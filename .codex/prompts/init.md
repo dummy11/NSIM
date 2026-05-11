@@ -1,5 +1,7 @@
 # init - nsim project init prompt
 
+Workflow: `docs/governance/nsim_codex_workflow.md`
+
  you'r a senior asci verification engineer and python tooling architect.
 
  the reporsitory is currently empty.

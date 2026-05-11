@@ -31,8 +31,10 @@
 - 仿真一个 case可以指定不同的 submit 
 - 一次回归可以指定多个 submit
 
-phase 1:首先生成一个规划文档
- 在编写实际代码之前，先生成一下文件：
-	docs/plan.md
-	docs/architecture.md
-	docs/roadmap.md
+首先生成一个规划文档,其他的不要做
+
+在编写实际代码之前，首先生成以下文件:
+docs/plan.md
+docs/architecture.md
+docs/roadmap.md
+docs/decisions.md

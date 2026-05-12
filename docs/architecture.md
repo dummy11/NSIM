@@ -51,7 +51,7 @@ Command Services
 - 纯文本 caselist
 - submit JSON 文件，并按 `nsim` 定义的 schema 强校验
 
-loader 应基于声明路径的配置文件本身来规范化相对路径，并识别工程对 `nsim` 版本的约束或选择。
+loader 应基于声明路径的配置文件本身来规范化相对路径，并识别工程对 `nsim` 版本的约束或选择。工程级 `nsim` 版本约束由工程描述文件声明。
 
 ### Project Model
 
@@ -59,7 +59,7 @@ loader 应基于声明路径的配置文件本身来规范化相对路径，并�
 
 ### Regression Planner
 
-将用户请求展开为具体运行任务。例如，一个包含 20 个 case 的 caselist 和 3 个 submit JSON 文件会被展开为 60 个仿真任务，并在需要时附加编译任务。VCS compile 当前按 submit 独立规划，后续可在 artifact 复用模型成熟后再优化共享。
+将用户请求展开为具体运行任务。例如，一个包含 20 个 case 的 caselist 和 3 个 submit JSON 文件会被展开为 60 个仿真任务，并在需要时附加编译任务。VCS compile 当前按 submit 独立规划，compile artifact 也按 submit 独立生成和追踪。
 
 ### Scheduler Interface
 
@@ -71,7 +71,7 @@ loader 应基于声明路径的配置文件本身来规范化相对路径，并�
 
 ### LSF Scheduler
 
-将任务提交到 LSF，用于大规模 regression。队列、资源和 license 约束可以来自 submit JSON，也可以由 `nsim` 命令行覆盖。该适配器应把 `bsub`、`bjobs` 和状态解析隔离在稳定 Python 接口之后。
+将任务提交到 LSF，用于大规模 regression。队列、资源和 license 约束可以来自 submit JSON，也可以由 `nsim` 命令行覆盖。命令行约束优先级高于 submit 配置。该适配器应把 `bsub`、`bjobs` 和状态解析隔离在稳定 Python 接口之后。
 
 ### Simulator Interface
 
@@ -89,9 +89,11 @@ loader 应基于声明路径的配置文件本身来规范化相对路径，并�
 - 环境变量
 - timeout 和 retry 策略扩展点
 
+DPI `.so` 的默认共享位置位于工程 cache。
+
 ### Verdi Adapter
 
-基于已完成或进行中的 run，使用正确的 FSDB、设计数据库和工程上下文启动 Verdi。Verdi adapter 不负责仿真流程本身。
+基于已完成或进行中的 run，使用正确的 FSDB、设计数据库和工程上下文启动 Verdi。Verdi adapter 不负责仿真流程本身。Verdi debug 所需设计数据库路径由 VCS adapter 生成并记录到 task metadata。
 
 ### Output Store
 
@@ -146,7 +148,22 @@ Output root 的默认位置来自用户配置或环境变量。Output Store 负�
 - 环境摘要
 - 任务列表和最终状态
 
-该元数据是 rerun 和 debug 的主要审计记录。长期存储先保持文件形式；只有当文件元数据和索引能力被证明不足时，才考虑引入数据库。
+该元数据是 rerun 和 debug 的主要审计记录。Regression metadata 统一使用一个 schema version。长期存储先保持文件形式；只有当文件元数据和索引能力被证明不足时，才考虑引入数据库。
+
+## Architecture Assumptions
+
+- `nsim` 以 Python CLI 工具形态交付，而不是服务端平台或 Web 应用。
+- ASIC 工程通过明确的工程描述文件被发现和识别。
+- `nsim` 工具、ASIC 工程源码和仿真输出目录彼此独立。
+- 不同 ASIC 工程可以使用不同版本的 `nsim`。
+- 初期使用 fake simulator 和本地多进程调度验证核心流程。
+- VCS、Verdi 和 LSF 通过 adapter 接入，不进入 CLI 业务逻辑。
+- DPI 编译使用工程提供的独立 Makefile，产物以 `.so` 形式存在。
+- Regression metadata 初期使用文件形式存储。
+
+## Architecture Open Questions
+
+- None
 
 ## 错误处理
 
@@ -172,3 +189,44 @@ Output root 的默认位置来自用户配置或环境变量。Output Store 负�
 - 使用 fake scheduler 测试任务状态变化
 - 使用示例 ASIC 工程 fixture 的集成测试
 - 面向真实 VCS、Verdi 和 LSF 安装的可选环境门控测试
+
+## File-Level Human Review
+
+### Project-Level References
+
+- None
+
+### Review Metadata
+
+- Status: Approved
+- Reviewer: Human
+- Decision Date: 2026-05-12
+
+### Human Decisions
+
+- `nsim` 以 Python CLI 工具形态交付。
+- ASIC 工程通过明确的工程描述文件被发现和识别。
+- `nsim` 工具、ASIC 工程源码和仿真输出目录彼此独立。
+- 不同 ASIC 工程可以使用不同版本的 `nsim`。
+- 初期使用 fake simulator 和本地多进程调度验证核心流程。
+- VCS、Verdi 和 LSF 通过 adapter 接入，不进入 CLI 业务逻辑。
+- DPI 编译使用工程提供的独立 Makefile，产物以 `.so` 形式存在。
+- Regression metadata 初期使用文件形式存储。
+- 工程级 `nsim` 版本约束应由工程描述文件声明。
+- VCS compile artifact 按 submit 独立。
+- DPI `.so` 的默认共享位置应位于工程 cache。
+- LSF queue、resource 和 license 约束的优先级应是命令行覆盖 submit。
+- Regression metadata 统一使用一个 schema version。
+- Verdi debug 所需设计数据库应由 VCS adapter 生成路径。
+
+### Human Review Notes
+
+- None
+
+### Approval Decision
+
+This architecture is approved as the Stage 0 Phase 3 baseline.
+
+### Notes
+
+- None

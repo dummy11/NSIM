@@ -39,3 +39,11 @@ Reviewer：<Ethan>
 日期：2026-05-12
 Reviewer：Human
 说明：文件级 `Human Decisions` 已作为后续文档同步依据。
+
+## Stage 0 Phase 3 Freeze
+
+状态：已冻结
+文档：`docs/architecture.md`
+日期：2026-05-12
+Reviewer：Human
+说明：文件级 `Human Decisions` 已作为后续文档同步依据。

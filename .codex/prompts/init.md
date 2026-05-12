@@ -39,4 +39,3 @@ Workflow: `docs/governance/nsim_codex_workflow.md`
 docs/plan.md
 docs/architecture.md
 docs/roadmap.md
-docs/decisions.md

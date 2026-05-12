@@ -110,7 +110,6 @@ nsim/
     plan.md
     architecture.md
     roadmap.md
-    decisions.md
     freeze_log.md
   src/
     nsim/
@@ -171,7 +170,20 @@ nsim verdi open <run-id>
 - 先实现本地执行，再加入 LSF 扩展。
 - 将每次 regression 视为可审计 artifact。
 
-## human desicions
+## File-Level Human Review
+
+### Project-Level References
+
+- None
+
+### Review Metadata
+
+- Status: Approved
+- Reviewer: Human
+- Decision Date: 2026-05-11
+
+### Human Decisions
+
 - `nsim` 是以 Python CLI 工具形态交付，而不是服务端平台或 Web 应用。
 - ASIC 工程可以通过一个明确的工程描述文件被发现和识别。
 - ASIC 工程自身继续维护源码、filelist、testbench、DPI 源码和已有脚本。
@@ -181,17 +193,27 @@ nsim verdi open <run-id>
 - 初期可用 fake simulator 和本地多进程调度验证核心流程，不要求立即接入真实 VCS、Verdi 或 LSF。
 - 真实 EDA 工具相关测试需要通过环境门控运行，普通 CI 不假设存在 VCS、Verdi 或 LSF。
 - regression 可追溯性优先依赖文件快照、hash 和机器可读 metadata，而不是人工命名约定。
-- 工程描述文件的文件名和格式是否固定为 `nsim.yaml`、`nsim.toml`
-- caselist 采用纯文本
-- submit JSON 的 schema 由 `nsim` 强约束
-- ASIC 工程 tag 优先使用 git tag、commit SHA
-- output root 的默认位置应来自用户配置、环境变量
-- VCS compile 按 submit 独立执行;
-- FSDB dump 由 submit和 testbench plusarg共同配合控制
-- DPI 编译产物工程共享，还是按 regression/run 隔离生成,可以通过 submit 控制，默认是工程共享
--  LSF 队列、资源和 license 约束可以通过 submit 控制，也可以通过 nsim 命令行控制
-- regression metadata 的长期存储先保持文件形式
+- 工程描述文件的文件名和格式固定为 `nsim.yaml` 或 `nsim.toml`。
+- caselist 采用纯文本。
+- submit JSON 的 schema 由 `nsim` 强约束。
+- ASIC 工程 tag 优先使用 git tag 或 commit SHA。
+- output root 的默认位置应来自用户配置或环境变量。
+- VCS compile 按 submit 独立执行。
+- FSDB dump 由 submit 和 testbench plusarg 共同配合控制。
+- DPI 编译产物默认工程共享，也可以通过 submit 控制为按 regression/run 隔离生成。
+- LSF 队列、资源和 license 约束可以通过 submit 控制，也可以通过 `nsim` 命令行控制。
+- regression metadata 的长期存储先保持文件形式。
+- 不同的项目下，`nsim` 可以使用不同的版本。
+- DPI 的编译使用独立的 Makefile，编译结果以 `.so` 的形式存在。
 
-## human release notes
-- 不同的项目下，nsim可以使用不同的版本
--  dpi 的编译使用独立的 Makefile,编译结果以 so 的形式存在
+### Human Review Notes
+
+- None
+
+### Approval Decision
+
+This plan is approved as the Stage 0 baseline.
+
+### Notes
+
+- Proceed to scaffold generation.

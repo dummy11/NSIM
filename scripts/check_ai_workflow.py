@@ -7,17 +7,28 @@ import sys
 
 WORKFLOW_PATH = Path("docs/governance/nsim_codex_workflow.md")
 REQUIRED_FILES = [
+    Path("AGENTS.md"),
     WORKFLOW_PATH,
     Path("docs/governance/change_requests.md"),
     Path("docs/freeze_log.md"),
 ]
 PROMPT_DIR = Path(".codex/prompts")
 REVIEW_BLOCK_FILES = [
+    Path("AGENTS.md"),
     Path("docs/plan.md"),
     Path("docs/roadmap.md"),
+    Path("docs/architecture.md"),
 ]
 
 WORKFLOW_REFERENCE = "docs/governance/nsim_codex_workflow.md"
+AGENTS_REQUIRED_REFERENCES = [
+    WORKFLOW_REFERENCE,
+    "docs/freeze_log.md",
+    "docs/governance/change_requests.md",
+    "docs/plan.md",
+    "docs/roadmap.md",
+    "docs/architecture.md",
+]
 REVIEW_BLOCK_HEADINGS = [
     "## File-Level Human Review",
     "### Project-Level References",
@@ -62,13 +73,14 @@ def check_prompt_references() -> list[str]:
 def check_agents_reference() -> list[str]:
     path = Path("AGENTS.md")
     if not path.exists():
-        return []
+        return ["missing required agent instruction file: AGENTS.md"]
 
     text = read_text(path)
-    if WORKFLOW_REFERENCE not in text:
-        return [f"AGENTS.md must require reading {WORKFLOW_REFERENCE}"]
-
-    return []
+    return [
+        f"AGENTS.md must require reading {reference}"
+        for reference in AGENTS_REQUIRED_REFERENCES
+        if reference not in text
+    ]
 
 
 def check_review_blocks() -> list[str]:

@@ -68,7 +68,30 @@ Stage 0 不生成任何实现代码。
 - `docs/architecture.md` 不包含与 mandatory decisions 冲突的说法。
 - 架构边界可以指导 Stage 1 之后的实现。
 
-## Phase 4：`docs/stage0-phase-planning.md`
+## Phase 4：`AGENTS.md`
+
+定位：
+
+- AI agent 的仓库入口规则和强制上下文来源。
+- 本文档规定 agent 修改仓库前必须读取的治理、规划、路线图和架构基线。
+
+任务：
+
+- 生成 `AGENTS.md`。
+- 强制要求读取 `docs/governance/nsim_codex_workflow.md`、`docs/freeze_log.md` 和 `docs/governance/change_requests.md`。
+- 强制要求读取 `docs/plan.md`、`docs/roadmap.md` 和 `docs/architecture.md`。
+- 明确执行具体 stage 或 phase 时必须读取目标文档和被修改文件的 `File-Level Human Review` 区块。
+- 明确修改 frozen scope 前必须走 approved change request。
+- 完成 draft、review、revise 和 freeze。
+
+退出标准：
+
+- `AGENTS.md` 已生成。
+- `AGENTS.md` 已被人工 review。
+- `AGENTS.md` 的强制读取规则与 Stage 0 已冻结基线一致。
+- `AGENTS.md` 已冻结后，才能进入后续 Stage 0 phase。
+
+## Phase 5：`docs/stage0-phase-planning.md`
 
 定位：
 
@@ -78,6 +101,7 @@ Stage 0 不生成任何实现代码。
 
 - 使用整数 Phase 编号。
 - 确认每一个 Stage 0 文档对应一个 Phase。
+- 确认 `AGENTS.md` 已作为独立 Phase 纳入 Stage 0。
 - 说明每个文档在 Stage 0 baseline 中的作用。
 
 退出标准：
@@ -85,7 +109,7 @@ Stage 0 不生成任何实现代码。
 - 本文件已与文件级 `Human Decisions` 规则对齐。
 - Stage 0 的文档级 Phase 划分清晰。
 
-## Phase 5：`docs/freeze_log.md`
+## Phase 6：`docs/freeze_log.md`
 
 定位：
 

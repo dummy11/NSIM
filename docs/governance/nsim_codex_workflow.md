@@ -20,7 +20,7 @@ This workflow must be read together with:
 - `docs/freeze_log.md`
 - `docs/governance/change_requests.md`
 
-When `AGENTS.md` exists, it must require AI agents to read this workflow before making repository changes.
+When `AGENTS.md` exists, it must require AI agents to read this workflow, the freeze log, the change request log, `docs/plan.md`, `docs/roadmap.md`, and `docs/architecture.md` before making repository changes.
 
 ## Core Principle
 

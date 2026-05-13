@@ -11,6 +11,7 @@ Review 对象：
 - `docs/plan.md`
 - `docs/roadmap.md`
 - `docs/architecture.md`
+- `AGENTS.md`
 - `docs/stage0-phase-planning.md`
 
 冻结前检查：
@@ -45,5 +46,13 @@ Reviewer：Human
 状态：已冻结
 文档：`docs/architecture.md`
 日期：2026-05-12
+Reviewer：Human
+说明：文件级 `Human Decisions` 已作为后续文档同步依据。
+
+## Stage 0 Phase 4 Freeze
+
+状态：已冻结
+文档：`AGENTS.md`
+日期：2026-05-13
 Reviewer：Human
 说明：文件级 `Human Decisions` 已作为后续文档同步依据。

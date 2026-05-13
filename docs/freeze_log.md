@@ -4,7 +4,7 @@
 
 ## Stage 0 Baseline
 
-状态：待冻结
+状态：已冻结
 
 Review 对象：
 
@@ -13,6 +13,7 @@ Review 对象：
 - `docs/architecture.md`
 - `AGENTS.md`
 - `docs/stage0-phase-planning.md`
+- `docs/freeze_log.md`
 
 冻结前检查：
 
@@ -23,7 +24,8 @@ Review 对象：
 
 冻结记录：
 
-- 待填写冻结日期、提交 ID 和 reviewer。
+- 见下方各 Phase freeze 记录。
+- Stage 0 baseline freeze 由 Stage 0 Phase 6 完成。
 
 ## Stage 0 Phase 1 Freeze
 
@@ -64,3 +66,48 @@ Reviewer：Human
 日期：2026-05-13
 Reviewer：Human
 说明：文件级 `Human Decisions` 已作为后续文档同步依据。
+
+## Stage 0 Phase 6 Freeze
+
+状态：已冻结
+文档：`docs/freeze_log.md`
+日期：2026-05-13
+Reviewer：Human
+说明：Stage 0 baseline 已完成最终封账。
+
+## File-Level Human Review
+
+### Project-Level References
+
+- `docs/plan.md`
+- `docs/roadmap.md`
+- `docs/architecture.md`
+- `AGENTS.md`
+- `docs/stage0-phase-planning.md`
+
+### Review Metadata
+
+- Status: Approved
+- Reviewer: Human
+- Decision Date: 2026-05-13
+
+### Human Decisions
+
+- Stage 0 baseline 包含 Phase 1-6 的所有 review/freeze 文档。
+- Stage 0 Phase 1-5 均已冻结。
+- `docs/freeze_log.md` 是 Stage 0 Phase 6。
+- `docs/freeze_log.md` 是 Stage 0 baseline 的最终封账文件。
+- Stage 0 完成后才能进入 Stage 1。
+- Stage 0 不生成实现代码。
+
+### Human Review Notes
+
+- None
+
+### Approval Decision
+
+This freeze log is approved as the Stage 0 Phase 6 baseline.
+
+### Notes
+
+- None

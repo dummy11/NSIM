@@ -171,4 +171,200 @@ Implementation Summary:
 
 ## Closed Change Requests
 
-- None
+## CR-20260514-003：Record freeze git commit ids in manifest
+
+Status: Re-frozen
+
+Request Date: 2026-05-14
+
+Requester: Human
+
+Current Stage:
+
+- Stage: Stage 0
+- Phase: Post-baseline governance improvement
+
+Affected Previous Stage:
+
+- Stage: Stage 0
+- Phase: Phase 1-6
+
+Affected Files:
+
+- `.codex/skills/nsim-stage0-freeze/SKILL.md`
+- `docs/governance/freeze_manifest.json`
+- `docs/governance/nsim_codex_workflow.md`
+- `docs/governance/change_requests.md`
+- `scripts/check_freeze.py`
+
+Frozen Status:
+
+- Frozen: Yes
+- Freeze Reference: `docs/freeze_log.md#stage-0-baseline`
+
+Approved Scope:
+
+- Require the freeze skill to commit and push freeze updates.
+- Record Stage/Phase freeze git commit ids in `docs/governance/freeze_manifest.json`.
+- Validate that recorded freeze commit ids are valid local git commits.
+
+Reason:
+
+- Freeze should be tied to uploaded git history, not only document text.
+- The freeze manifest should connect Stage/Phase snapshots to git commit ids.
+
+Required Updates:
+
+- `.codex/skills/nsim-stage0-freeze/SKILL.md`
+- `docs/governance/freeze_manifest.json`
+- `docs/governance/nsim_codex_workflow.md`
+- `docs/governance/change_requests.md`
+- `scripts/check_freeze.py`
+
+Tests / Checks:
+
+- `python3 scripts/check_freeze.py` passed.
+- `python3 scripts/check_ai_workflow.py` passed.
+
+Implementation Summary:
+
+- Unfrozen: Stage 0 governance process for this approved rebaseline scope.
+- Changed: Freeze skill now requires commit, push, and manifest commit-id recording; manifest includes Stage 0 Phase 1-6 freeze commit ids.
+- Re-frozen: Stage 0 manifest now records commit-backed snapshots.
+- Tests run: `python3 scripts/check_freeze.py`; `python3 scripts/check_ai_workflow.py`.
+- Remaining risks: Manifest records the commit containing the frozen content; a follow-up manifest update may necessarily be a separate governance commit because git commit ids are content-addressed.
+
+## CR-20260514-002：Simplify freeze log and strengthen review metadata checks
+
+Status: Re-frozen
+
+Request Date: 2026-05-14
+
+Requester: Human
+
+Current Stage:
+
+- Stage: Stage 0
+- Phase: Post-baseline governance improvement
+
+Affected Previous Stage:
+
+- Stage: Stage 0
+- Phase: Phase 1-6
+
+Affected Files:
+
+- `docs/freeze_log.md`
+- `docs/governance/nsim_codex_workflow.md`
+- `scripts/check_ai_workflow.py`
+- `docs/governance/freeze_manifest.json`
+- `docs/governance/change_requests.md`
+
+Frozen Status:
+
+- Frozen: Yes
+- Freeze Reference: `docs/freeze_log.md#stage-0-baseline`
+
+Approved Scope:
+
+- Simplify `docs/freeze_log.md` so it records Stage/Phase identifiers rather than repeating phase file mappings.
+- Treat `docs/stage0-phase-planning.md` as the source of truth for Stage/Phase to file mapping.
+- Add checks that review metadata status is consistent with approval decisions.
+- Add checks that project-level reference file paths exist.
+- Regenerate `docs/governance/freeze_manifest.json` after the approved governance update.
+
+Reason:
+
+- Stage/Phase file mappings should have one source of truth.
+- Review metadata and approval decisions should be machine-checkable.
+- Project-level references should not drift into broken paths.
+
+Required Updates:
+
+- `docs/freeze_log.md`
+- `docs/governance/nsim_codex_workflow.md`
+- `scripts/check_ai_workflow.py`
+- `docs/governance/freeze_manifest.json`
+- `docs/governance/change_requests.md`
+
+Tests / Checks:
+
+- `python3 scripts/check_freeze.py` passed.
+- `python3 scripts/check_ai_workflow.py` passed.
+
+Implementation Summary:
+
+- Unfrozen: Stage 0 governance process for this approved rebaseline scope.
+- Changed: Simplified freeze log, added metadata/approval consistency checks, added project-level reference existence checks, and regenerated the freeze manifest.
+- Re-frozen: Stage 0 locked sections are protected by the updated `docs/governance/freeze_manifest.json`.
+- Tests run: `python3 scripts/check_freeze.py`; `python3 scripts/check_ai_workflow.py`.
+- Remaining risks: Existing Stage 0 freeze history remains append-only; `docs/stage0-phase-planning.md` is the source of truth for file mapping.
+
+## CR-20260514-001：Stage 0 living-document governance rebaseline
+
+Status: Re-frozen
+
+Request Date: 2026-05-14
+
+Requester: Human
+
+Current Stage:
+
+- Stage: Stage 0
+- Phase: Post-baseline governance improvement
+
+Affected Previous Stage:
+
+- Stage: Stage 0
+- Phase: Phase 1-6
+
+Affected Files:
+
+- `AGENTS.md`
+- `docs/plan.md`
+- `docs/roadmap.md`
+- `docs/architecture.md`
+- `docs/stage0-phase-planning.md`
+- `docs/freeze_log.md`
+- `docs/governance/change_requests.md`
+- `docs/governance/nsim_codex_workflow.md`
+- `docs/governance/freeze_manifest.json`
+- `scripts/check_ai_workflow.py`
+- `scripts/check_freeze.py`
+
+Frozen Status:
+
+- Frozen: Yes
+- Freeze Reference: `docs/freeze_log.md#stage-0-baseline`
+
+Approved Scope:
+
+- Add lifecycle, review trace, and revision log sections to Stage 0 baseline documents.
+- Add a freeze manifest for Stage 0 locked sections.
+- Add machine checks to detect frozen locked-section changes without approved CR coverage.
+- Update governance workflow and checks to require the new freeze enforcement files.
+
+Reason:
+
+- Stage 0 documents may need frequent living updates after baseline freeze.
+- Review and revise actions need durable traceability inside repository files.
+- Freeze enforcement should be machine-checkable instead of relying only on AI discipline.
+
+Required Updates:
+
+- `docs/freeze_log.md`
+- affected file-level `Human Decisions` or `Notes`
+- `docs/governance/change_requests.md`
+
+Tests / Checks:
+
+- `python3 scripts/check_freeze.py` passed.
+- `python3 scripts/check_ai_workflow.py` passed.
+
+Implementation Summary:
+
+- Unfrozen: Stage 0 governance process for this approved rebaseline scope.
+- Changed: Added living-document lifecycle, review trace, revision log, freeze manifest, and freeze checks.
+- Re-frozen: Stage 0 locked sections are protected by `docs/governance/freeze_manifest.json`.
+- Tests run: `python3 scripts/check_freeze.py`; `python3 scripts/check_ai_workflow.py`.
+- Remaining risks: The first manifest captures hashes after this approved rebaseline; older commits remain authoritative for the original Stage 0 freeze history.

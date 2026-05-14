@@ -173,6 +173,43 @@
 
 - 工程师可以检查、重跑和比较 regression，而不需要手动翻目录
 - regression artifact 在工具和工程版本变化后仍可追溯
+
+## Lifecycle
+
+Status: Living
+Baseline: Stage 0 v1
+Frozen Sections:
+- Human Decisions
+- Approval Decision
+
+Mutable Sections:
+- Notes
+- Open Questions
+- Review Trace
+- Revision Log
+- Stage detail clarifications that do not alter approved stage boundaries
+
+## Review Trace
+
+### Review 2026-05-12
+
+Reviewer: Human
+Status: Approved
+
+Findings:
+- Top-level roadmap stages are approved as Stage units.
+- Stage 0 subphases are delegated to `docs/stage0-phase-planning.md`.
+
+Required Changes:
+- None
+
+Resolution:
+- Approved as Stage 0 Phase 2 baseline.
+
+## Revision Log
+
+- 2026-05-14: Rebaseline governance metadata to support living-document updates and machine-checked frozen sections.
+
 ## File-Level Human Review
 
 ### Project-Level References

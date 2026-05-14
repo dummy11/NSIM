@@ -170,6 +170,41 @@ nsim verdi open <run-id>
 - 先实现本地执行，再加入 LSF 扩展。
 - 将每次 regression 视为可审计 artifact。
 
+## Lifecycle
+
+Status: Living
+Baseline: Stage 0 v1
+Frozen Sections:
+- Human Decisions
+- Approval Decision
+
+Mutable Sections:
+- Notes
+- Open Questions
+- Review Trace
+- Revision Log
+- Clarifications that do not alter product scope or locked decisions
+
+## Review Trace
+
+### Review 2026-05-11
+
+Reviewer: Human
+Status: Approved
+
+Findings:
+- The plan establishes the Stage 0 product baseline.
+
+Required Changes:
+- None
+
+Resolution:
+- Approved as Stage 0 baseline.
+
+## Revision Log
+
+- 2026-05-14: Rebaseline governance metadata to support living-document updates and machine-checked frozen sections.
+
 ## File-Level Human Review
 
 ### Project-Level References

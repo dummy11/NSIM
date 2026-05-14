@@ -54,6 +54,41 @@ Stage 0 不生成实现代码，不创建 Python package skeleton，不引入 CL
 
 - None
 
+## Lifecycle
+
+Status: Living
+Baseline: Stage 0 v1
+Frozen Sections:
+- Human Decisions
+- Approval Decision
+
+Mutable Sections:
+- Notes
+- Open Questions
+- Review Trace
+- Revision Log
+- Clarifications that do not alter mandatory reading, frozen-scope handling, or Stage 0 boundaries
+
+## Review Trace
+
+### Review 2026-05-13
+
+Reviewer: Human
+Status: Approved
+
+Findings:
+- AGENTS.md must require AI agents to read governance, plan, roadmap, and architecture baselines before modifying the repository.
+
+Required Changes:
+- None
+
+Resolution:
+- Approved as Stage 0 Phase 4 baseline.
+
+## Revision Log
+
+- 2026-05-14: Rebaseline governance metadata to support living-document updates and machine-checked frozen sections.
+
 ## File-Level Human Review
 
 ### Project-Level References

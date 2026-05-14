@@ -126,6 +126,40 @@ Stage 0 不生成任何实现代码。
 - `docs/freeze_log.md` 已存在。
 - Stage 0 baseline 可以由人工 review 后冻结。
 
+## Lifecycle
+
+Status: Living
+Baseline: Stage 0 v1
+Frozen Sections:
+- Human Decisions
+- Approval Decision
+
+Mutable Sections:
+- Notes
+- Review Trace
+- Revision Log
+- Clarifications that do not alter Stage 0 phase boundaries
+
+## Review Trace
+
+### Review 2026-05-13
+
+Reviewer: Human
+Status: Approved
+
+Findings:
+- Phase numbering and AGENTS.md insertion are approved for Stage 0.
+
+Required Changes:
+- None
+
+Resolution:
+- Approved as Stage 0 Phase 5 baseline.
+
+## Revision Log
+
+- 2026-05-14: Rebaseline governance metadata to support living-document updates and machine-checked frozen sections.
+
 ## File-Level Human Review
 
 ### Project-Level References

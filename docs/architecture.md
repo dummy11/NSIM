@@ -190,6 +190,41 @@ Output root 的默认位置来自用户配置或环境变量。Output Store 负�
 - 使用示例 ASIC 工程 fixture 的集成测试
 - 面向真实 VCS、Verdi 和 LSF 安装的可选环境门控测试
 
+## Lifecycle
+
+Status: Living
+Baseline: Stage 0 v1
+Frozen Sections:
+- Human Decisions
+- Approval Decision
+
+Mutable Sections:
+- Notes
+- Architecture Open Questions
+- Review Trace
+- Revision Log
+- Clarifications that do not alter architecture boundaries or locked decisions
+
+## Review Trace
+
+### Review 2026-05-12
+
+Reviewer: Human
+Status: Approved
+
+Findings:
+- Architecture boundaries and adapter responsibilities are approved for Stage 0.
+
+Required Changes:
+- None
+
+Resolution:
+- Approved as Stage 0 Phase 3 baseline.
+
+## Revision Log
+
+- 2026-05-14: Rebaseline governance metadata to support living-document updates and machine-checked frozen sections.
+
 ## File-Level Human Review
 
 ### Project-Level References

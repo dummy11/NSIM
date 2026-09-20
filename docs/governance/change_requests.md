@@ -171,6 +171,75 @@ Implementation Summary:
 
 ## Closed Change Requests
 
+## CR-20260920-001：吸收工程回归经验与存储故障处理
+
+Status: Re-frozen
+
+Request Date: 2026-09-20
+
+Requester: Human
+
+Category: Rebaseline
+
+Approval Basis:
+
+- 用户在审阅本会话中 regress 借鉴分析与存储故障处理建议后，明确授权「行，都修改一下」。本请求据此批准文档修订范围，不代表相关功能已经实现或经过真实 EDA 验证。
+
+Current Stage:
+
+- Stage: Stage 0
+- Phase: Post-baseline planning revision
+
+Affected Previous Stage:
+
+- Stage: Stage 0
+- Phase: Phase 1-3, Phase 6
+
+Affected Files:
+
+- `docs/plan.md`
+- `docs/architecture.md`
+- `docs/roadmap.md`
+- `docs/freeze_log.md`
+- `docs/governance/change_requests.md`
+- `docs/governance/freeze_manifest.json`
+
+Frozen Status:
+
+- Frozen: Yes
+- Freeze Reference: `docs/freeze_log.md#stage-0-baseline`
+
+Approved Scope:
+
+- `docs/plan.md`: 增补防假通过、seed 与输入追溯、隔离输出、失败重跑、可扩展结果检查、存储故障检测与恢复的产品要求及文件级决策。
+- `docs/architecture.md`: 增补任务与 attempt 身份、状态和 verdict 分离、编译元数据、结果检查器、并发调度、最终报告发布、执行节点存储检查与故障恢复契约及文件级决策。
+- `docs/roadmap.md`: 将上述要求及可验证退出标准分配到现有 Stage 2-8，保留 Stage 0/1 边界及各 Stage 主目标。
+- `docs/freeze_log.md`: 追加本 CR 的临时解冻和再冻结记录，保留历史记录。
+- `docs/governance/change_requests.md`: 记录授权、实施、检查和关闭结果。
+- `docs/governance/freeze_manifest.json`: 更新受影响文档的哈希与相应 Phase 的再冻结提交记录，保留原提交来源。
+
+Reason:
+
+- 将 npu8860_ai regress 的实际经验转化为通用平台需求，避免假通过、证据覆盖、执行节点挂载差异和日志可见性延迟造成误判。
+- 将物理存储故障后的隔离与重跑纳入规划；不将现有脚本描述成已经具备磁盘修复或备份恢复能力。
+
+Required Updates:
+
+- 受影响文档的 Review Trace、Revision Log、Human Decisions / Notes。
+- 冻结记录、冻结 manifest 与本 CR 状态。
+
+Tests / Checks:
+
+- `python3 scripts/check_freeze.py`、`python3 scripts/check_ai_workflow.py`、`git diff --check`；在最终 manifest 更新后复验。
+
+Implementation Summary:
+
+- Unfrozen: 仅本 Approved Scope。
+- Changed: 产品要求、架构契约、Stage 2-8 验收标准与文件级 review/decision 记录已同步。
+- Re-frozen: Stage 0 Phase 1-3 修订与 Phase 6 追加记录纳入当前 manifest；提交来源由 snapshots 记录。
+- Tests run: 冻结检查、工作流检查与 diff 检查通过；仅文档检查，无真实 EDA 或磁盘故障运行。
+- Remaining risks: Stage 0 仅定义契约，不运行真实 VCS / LSF 或执行破坏性磁盘故障测试。
+
 ## CR-20260514-003：Record freeze git commit ids in manifest
 
 Status: Re-frozen

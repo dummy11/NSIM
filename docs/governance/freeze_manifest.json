@@ -3,7 +3,7 @@
   "baseline": "stage0-v1",
   "status": "frozen",
   "mode": "section-lock",
-  "generated_date": "2026-05-14",
+  "generated_date": "2026-09-20",
   "snapshots": [
     {
       "stage": "Stage 0",
@@ -39,43 +39,43 @@
   "files": [
     {
       "path": "docs/plan.md",
-      "sha256": "e2adcb226ca282504f06ef7ff8ec37fa8792794c55849278e3eb00de0b584358",
+      "sha256": "10f221b3cdd950f6b182520461abb4fdd6830dd6de904269e3fd897a16a5b625",
       "locked_sections": [
         {
           "name": "Human Decisions",
-          "sha256": "581ec70a6ff74b1e6a74b5aa8d538065921373de4fa6d62eeec1664603a80aad"
+          "sha256": "bb88125b6b25a1044fb24d30550cfac49d4342106e0bf4a3929e3701d87e216a"
         },
         {
           "name": "Approval Decision",
-          "sha256": "0438be2857fda21641d2d509fefce013eb086ade4019fd80adcb5888be4f882c"
+          "sha256": "e9cdbff53a3aabc48081be53e617beae123aecf2cba7a5ab19d84cb49641fcea"
         }
       ]
     },
     {
       "path": "docs/roadmap.md",
-      "sha256": "62ca3b40dcd87e5ffd75257a6775a5bfca7dbd3a8b14c4d2c1963d757f79c466",
+      "sha256": "e43588db20038bc91e57981d57d9ba6deb0fc4a96895396d602f788715cf3b35",
       "locked_sections": [
         {
           "name": "Human Decisions",
-          "sha256": "20c1f4dda1e203441a80ce693d7cd055bd0baf759055349fc0fd943e3102bfce"
+          "sha256": "d7cbdfec8dc45d831052432f84deea85d4d3e6af0b45bb1b3b5558d6c6b76812"
         },
         {
           "name": "Approval Decision",
-          "sha256": "0a795877614bc710c7771c072de5fe9edf05cac9c495adc565738ff05fb396ca"
+          "sha256": "22e7613f8aae4ef3fbea6ad3bd088d0c5aab15904a36e909b20a6514fd99ac44"
         }
       ]
     },
     {
       "path": "docs/architecture.md",
-      "sha256": "08e2a15d6d8475c9ee1f5da58e098de4076455c885f61df9f8cc62fdfd19deef",
+      "sha256": "726106db86b01c14227faf96154b06346682924c210775b693a8bf2f9bbdb6b8",
       "locked_sections": [
         {
           "name": "Human Decisions",
-          "sha256": "bbb14f0dbf4094529dc7ea6b81509b8df0bd747c97c78d5a6fbd5fb5b5cd2005"
+          "sha256": "30f47d3c4cd463290009fa5160279a3ffc12208649a1882e0e930d510b056afd"
         },
         {
           "name": "Approval Decision",
-          "sha256": "1eadb70249ade9e72b539c7fc1299381ac3f14df17d882273afcafaf81ad44fa"
+          "sha256": "3c43fed723d9c26e3fa8912ad95e03b516eafa1cd203837a1f98dd3ccdfe2014"
         }
       ]
     },
@@ -109,7 +109,7 @@
     },
     {
       "path": "docs/freeze_log.md",
-      "sha256": "20e8d17124e799616b38c18d23341c445641a73d2b5ec8bc11857e8e690a97cb",
+      "sha256": "a3ff4c7e52eaa1b81ae8f921bca20983e14194618004a5a93fe1ef4aef443117",
       "locked_sections": [
         {
           "name": "Stage 0 Baseline",

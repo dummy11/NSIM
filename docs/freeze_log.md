@@ -70,6 +70,26 @@ Reviewer：Human
 Reviewer：Human
 说明：Stage 0 baseline 已完成最终封账。
 
+## CR-20260920-001 Temporary Unfreeze
+
+状态：范围内临时解冻
+日期：2026-09-20
+Reviewer：Human
+范围：Stage 0 Phase 1-3；Phase 6 仅追加本次过程记录。
+依据：CR-20260920-001，用户已授权回归经验与存储故障处理的规划修订。
+说明：历史冻结记录保留；只允许 Approved Scope 中的变更，Stage 0 不生成实现代码。
+
+## CR-20260920-001 Re-freeze
+
+状态：已重新冻结
+日期：2026-09-20
+Reviewer：Human
+范围：Stage 0 Phase 1-3；Phase 6 追加过程记录。
+依据：本会话人工批准的 CR-20260920-001。
+说明：回归可靠性和存储故障处理已同步到规划、架构及 Stage 2-8 验收标准。历史冻结记录及原有决策保留；新增决策由本 CR 追溯。
+检查：冻结检查、AI 工作流检查、diff 格式检查通过；本次不包含实现或真实 EDA/磁盘故障测试。
+提交：对应 snapshots 的 freeze_commit 指向包含本次冻结内容的提交；原冻结提交保存在 previous_freeze_commit。远端上传完成才算冻结流程完成。
+
 ## Lifecycle
 
 Status: Living
@@ -132,6 +152,8 @@ Resolution:
 
 ## Revision Log
 
+- 2026-09-20: CR-20260920-001，追加 Phase 1-3 范围内修订的解冻与再冻结记录，历史冻结记录保留。
+
 - 2026-05-14: Rebaseline governance metadata to support living-document updates and machine-checked frozen sections.
 - 2026-05-14: Simplify freeze log to record Stage/Phase identifiers and rely on `docs/stage0-phase-planning.md` for file mapping.
 
@@ -172,4 +194,4 @@ This freeze log is approved as the Stage 0 Phase 6 baseline.
 
 ### Notes
 
-- None
+- CR-20260920-001 仅追加本次过程记录，未改写 Stage 0 原始冻结记录。

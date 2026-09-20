@@ -160,6 +160,29 @@ nsim verdi open <run-id>
 
 具体命令名称可以在 CLI 设计阶段调整，但接口必须保持显式且便于脚本调用。
 
+## 回归可靠性与恢复要求
+
+以下要求来自 CR-20260920-001，属于后续实现的验收输入。
+
+- 测试通过必须有完整的结束证据和所需检查结果。仅正常退出、零 mismatch、未执行比较或日志缺失均不能替代有效检查；允许工程显式选择仅存活检查，但报告必须与功能通过区分。
+- 在任务规划时确定 seed，并保存 case、submit、plusargs、工程版本、工具版本、编译身份与配置快照。相同 seed 是复现条件之一，不单独保证结果完全一致。
+- 每次 regression、每组 submit、每个 case/seed 和每次 attempt 拥有独立身份与输出路径；失败重跑保留原结果，并记录来源关联。
+- 任务按并发上限持续补位；实时进度与最终报告分离。只有完整的最终快照可以作为通过判定和失败重跑输入。
+- 允许工程提供结果解析与检查扩展，将功能、参考模型和性能检查分别记录，再按已快照的策略汇总；ACC 特定日志和性能公式不写入通用核心。
+- 回归读取确定的工程输入，编译和运行不得隐式 git pull 或清理旧回归。清理单独执行，并保护正在使用的编译产物和运行证据。
+- 检测实际执行节点的路径可见性、输出可写性、可用空间、inode 及可获取的配额信息；启动前检查不能代替运行时 I/O 错误处理。
+- 挂载缺失、空间不足、配额不足、持续 I/O 错误应记录为基础设施失败，与 DUT 验证失败分开。受影响节点或存储停止接收新任务，健康资源上的无关任务可继续。
+- 瞬态存储故障与产物可见性延迟采用有上限的等待或重试。持续故障只允许在配置好的健康存储上，从可信输入创建新 attempt；无法验证输入时停止恢复。
+- 证据缺失或损坏时标记不完整，不能据此宣布通过。原子写入防止半份报告；硬盘损坏后的数据恢复依赖底层备份与冗余，NSIM 不负责修盘、修文件系统或提供存储备份服务。
+
+### 工程经验来源与适用边界
+
+参考工程为 `npu8860_ai/acc`，检查对象为 `sim/regress/Makefile`、`collect_results.py`、`collect_performance.py` 及其测试，故障历史见该工程 `docs/handoff.md` 与 `docs/handoff_archive.md`。这些是外部工程定位信息，不是 NSIM 的运行依赖或公开测试资产。
+
+已有脚本体现了显式 seed、逐 case 目录、失败清单、独立重跑、滚动并发、结果检查和原子报告写入。历史记录描述了 `/space8` 在部分 LSF 节点不可见及 VCS runtime 环境差异，通过选择兼容队列解决启动故障；并使用有限重读处理 NFS 日志可见性延迟。未发现物理硬盘损坏后自动恢复的实现。
+
+NSIM 将该工程作为首个真实接入候选；通用 CI 使用自建的最小 fake fixture，真实接入在相应 Stage 的环境门控下验证。静态 HTML/Markdown 报告属于文件产物，不引入 Web 服务。队列名、挂载路径、工具环境、存储阈值和恢复目标必须可配置，不能固化参考工程的环境值。
+
 ## 开发原则
 
 - 按可 review 的阶段推进。
@@ -201,7 +224,23 @@ Required Changes:
 Resolution:
 - Approved as Stage 0 baseline.
 
+### Review 2026-09-20 CR-20260920-001
+
+Reviewer: Human
+Status: Approved
+
+Findings:
+- 用户已审阅回归经验和存储故障建议，并授权「行，都修改一下」。
+
+Required Changes:
+- 将已讨论要求纳入本文件，并与产品、架构和路线图同步。
+
+Resolution:
+- 按 CR-20260920-001 批准范围修订；本记录是范围授权落实，不声明后续功能已实现或真实环境已验证。
+
 ## Revision Log
+
+- 2026-09-20: CR-20260920-001，补充回归可靠性与存储故障检测、隔离和恢复契约；保留原历史决策与阶段主目标。
 
 - 2026-05-14: Rebaseline governance metadata to support living-document updates and machine-checked frozen sections.
 
@@ -215,7 +254,7 @@ Resolution:
 
 - Status: Approved
 - Reviewer: Human
-- Decision Date: 2026-05-11
+- Decision Date: 2026-09-20
 
 ### Human Decisions
 
@@ -241,14 +280,20 @@ Resolution:
 - 不同的项目下，`nsim` 可以使用不同的版本。
 - DPI 的编译使用独立的 Makefile，编译结果以 `.so` 的形式存在。
 
+- 有效通过要求完整执行证据与必需检查实际通过；仅存活检查须显式选择并单独标识。
+- 规划时记录 seed 和输入/编译身份，重跑创建关联的新 attempt 并保留原始证据。
+- 存储和执行环境故障与 DUT 失败分开，支持检测、隔离、有界重试及在已配置健康存储上从可信输入重跑；不负责修盘或备份。
+
 ### Human Review Notes
 
 - None
 
 ### Approval Decision
 
+CR-20260920-001 scope approved by Human on 2026-09-20; applied to the requirements in this document. Historical baseline approval follows.
+
 This plan is approved as the Stage 0 baseline.
 
 ### Notes
 
-- Proceed to scaffold generation.
+- CR-20260920-001：补充可靠性与存储恢复要求后再进入 Stage 1；本次不生成实现代码。

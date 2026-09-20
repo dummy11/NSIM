@@ -29,6 +29,7 @@ Command Services
  |     +-- Synopsys VCS Adapter
  |     +-- Verdi Adapter
  +-- Output Store
+ +-- Result Checkers
  +-- Report Generator
 ```
 
@@ -150,6 +151,57 @@ Output root 的默认位置来自用户配置或环境变量。Output Store 负�
 
 该元数据是 rerun 和 debug 的主要审计记录。Regression metadata 统一使用一个 schema version。长期存储先保持文件形式；只有当文件元数据和索引能力被证明不足时，才考虑引入数据库。
 
+## 任务身份、执行与结果契约
+
+### 规划与编译身份
+
+Planner 在执行前生成稳定的 task id、有效 seed 和初始 attempt id，明确 compile → simulate 依赖。相同 submit 的 case 可以复用同一个受追踪 compile artifact；不同 submit 仍独立编译。编译元数据记录工程身份、输入 hash、工具版本、有效参数、Golden/参考模型是否启用及其身份；不得以当前 cache 目录是否存在推断旧二进制的能力。
+
+输入快照记录工程 commit/tag、dirty 状态、相关输入 hash、caselist、有效 submit、plusargs、工具与环境身份。源码引用必须可验证；输入已变化且无法取得原内容时，不能标为精确重跑。NSIM 不自动更新源码；调用工程构建入口时也必须禁止隐式拉取源码和清理既有回归。
+
+保持现有输出根布局，build 按 submit/compile id 隔离，logs、waves、tasks 下按 task id/attempt id 隔离。名称由受控 id 映射，不能直接将不受校验的 case 名拼为路径。路径在配置加载时解析，改变工作目录后不丢失原含义。重跑和恢复均创建新 attempt，不覆盖旧结果；清理需确认产物不再被活动任务引用。
+
+### 调度状态与结果判定
+
+调度状态表示 planned、queued、running、completed、failed、cancelled 等执行进度；检查 verdict 表示验证结果，两者独立记录。具体枚举和字段在相应实现阶段定稿。
+
+- Scheduler 显式保存 job id、执行节点、提交/启动/结束时间、退出码、启动 stderr 和失败原因；时间未知时保持未知，不从目录 mtime 伪造真实调度时间。
+- 本地调度采用有上限的滚动并发窗口；一个任务结束即补充下一个。单个 DUT 失败按策略处理，不阻塞无关任务。
+- 零退出码不足以通过；非零退出码、超时、取消或证据不完整也不能被日志中的成功 banner 覆盖。
+- 区分验证失败、未执行所需比较、仅存活检查通过、崩溃/超时、基础设施失败和证据不完整。所需比较未发生时，即使 mismatch 为零也不通过。
+
+### Result Checkers 与最终发布
+
+工程提供受版本追踪的解析器，将原始日志或结构化记录转换成统一检查结果：检查器身份、schema version、是否必需、是否实际执行、verdict、失败原因和证据引用。核心不内置 ACC banner、Syscan 参数或 ACC 性能公式。功能、Golden、性能等必需检查全部有效通过，且执行及证据均完整，才允许最终通过；仅存活检查必须由策略显式选择并在报告中标识。
+
+Report Generator 从持久化任务和检查结果生成 JSON 与面向人的 Markdown/静态 HTML。实时快照可显示排队/运行，但不得发布最终失败清单。最终结果和重跑清单引用同一已完成快照；采用单写者或有序发布，防止旧实时快照覆盖新终态。
+
+Output Store 在同一文件系统内用唯一临时文件与原子替换发布完整文件。多文件结果以最后发布的完成 manifest 关联各文件身份/hash；任何必需文件发布失败，都不能将该批次标为完整。单文件原子替换不等价于多文件事务、断电持久性或备份。
+
+### 重跑与恢复来源
+
+失败重跑从最终快照选取未满足该批策略的 task，保存 source regression/task/attempt，默认使用原 seed、有效 submit、plusargs 和可验证的工程/编译身份。用户更换 seed 或输入时必须记录差异。编译产物损坏时只能从可验证输入重新构建并记录新身份。
+
+重跑或基础设施重试不会删除原失败。自动重试必须有次数、时间预算及适用原因限制；未确认旧 job 已终止或取消时不得重叠启动副本，应保留未知状态并等待处置。
+
+## 存储与执行环境故障契约
+
+Storage 检查由 Output Store 提供，Scheduler 在实际执行节点启动任务前调用。检查输入、编译产物和输出路径的可见性与读写能力，采集节点、挂载/文件系统信息、可用字节、inode 和可获得的配额信息。无法查询的配额标记未知，不能报告已验证。阈值、重试预算及备用 output root 来自配置并纳入快照。
+
+LSF 队列配置必须表达或引用所需工具环境与存储条件；编译和仿真不要求同一主机，但执行环境必须兼容、产物必须一致可见。提交机上的文件检查不能替代执行节点检查；不把 `nightly` 或 `/space8` 写死为平台默认值。
+
+| 故障类别 | 检测与记录 | 处理与恢复条件 |
+|---|---|---|
+| 挂载缺失、权限不足、工具 loader 缺失 | 在执行节点检查并保存路径、节点、原始 stderr 与原因；不单凭 No such file 区分缺文件和 loader 问题 | 标记基础设施失败；隔离不兼容节点/配置，条件恢复或选择已配置兼容资源后才可新建 attempt |
+| 磁盘空间、inode 或配额耗尽 | 启动前检查并识别运行中 ENOSPC/EDQUOT 等写入错误 | 暂停向受影响存储派发；保留可取得的证据，不自动删除旧回归；恢复空间后验证读写再继续 |
+| NFS 延迟、短暂不可用 | 将 job 完成与产物可见分开；记录有截止时间的重读与重试 | 缺失或不完整的必需产物均允许有限等待；超预算记为证据不完整/存储故障，不能无限等待或判 PASS |
+| 持续 I/O 错误、磁盘损坏 | 保存首次错误、受影响根目录和最后可信状态 | 隔离故障存储；在已配置健康根目录校验输入后创建新 attempt；原产物缺失标记丢失，不声称已经恢复 |
+| 截断日志、校验失败、发布失败 | 对照完成 manifest、检查器要求与 hash 验证证据 | 禁止完整通过；保留原故障，必要时从可信输入重跑 |
+
+存储故障还可能使故障记录本身无法写入原 output root。调度控制端应将最小事件（task/attempt、节点、路径、错误、时间）写入独立于该根目录的已配置健康事件目录；若也不可写，停止相关派发，以非零退出状态和 stderr 告知证据未持久化，不能假装记录成功。控制事件保持文件形式，不引入数据库。
+
+默认恢复粒度为从输入重新运行一个 attempt，不承诺仿真进程断点续跑。故障范围按节点或存储根目录隔离；只有重新验证挂载、读写及容量后才能解除隔离。物理硬盘和文件系统修复、备份管理由基础设施负责；NSIM 负责检测、隔离、证据状态与受控重跑。
+
 ## Architecture Assumptions
 
 - `nsim` 以 Python CLI 工具形态交付，而不是服务端平台或 Web 应用。
@@ -177,6 +229,8 @@ Output root 的默认位置来自用户配置或环境变量。Output Store 负�
 - 仿真器编译错误
 - 仿真器运行错误
 - 报告生成错误
+- 存储/执行环境基础设施错误
+- 证据缺失、损坏或发布不完整
 
 每个失败任务都应保留足够上下文，使工程师能够手动复现失败命令。
 
@@ -189,6 +243,17 @@ Output root 的默认位置来自用户配置或环境变量。Output Store 负�
 - 使用 fake scheduler 测试任务状态变化
 - 使用示例 ASIC 工程 fixture 的集成测试
 - 面向真实 VCS、Verdi 和 LSF 安装的可选环境门控测试
+
+### 可靠性验收场景
+
+后续测试须使用受控 fake fixture 或故障注入，不破坏真实磁盘：
+
+- 退出码为零但比较未发生、缺结束记录、必需指标缺失，均不能成为有效通过；功能和性能任一失败均保留。
+- 同 case 的多 submit、多 seed、多 attempt 并行不覆盖；慢任务不会使其它空闲槽停顿。
+- 实时与最终报告并发发布、日志延迟出现/截断、报告写入失败，不能产生错误最终快照或重跑清单。
+- 模拟挂载不可见、只读路径、空间/inode/配额不足、I/O 错误，确认故障分类、派发隔离和有界等待；真实 LSF 环境再验证执行节点差异。
+- 故障存储与健康存储并存，健康任务继续；源输入变化、损坏或旧 job 状态未知时拒绝盲目恢复。
+- 原 seed 与输入身份重跑可追溯；备用存储恢复创建新 attempt，保留原失败和丢失证据标记。
 
 ## Lifecycle
 
@@ -221,7 +286,23 @@ Required Changes:
 Resolution:
 - Approved as Stage 0 Phase 3 baseline.
 
+### Review 2026-09-20 CR-20260920-001
+
+Reviewer: Human
+Status: Approved
+
+Findings:
+- 用户已审阅回归经验和存储故障建议，并授权「行，都修改一下」。
+
+Required Changes:
+- 将已讨论要求纳入本文件，并与产品、架构和路线图同步。
+
+Resolution:
+- 按 CR-20260920-001 批准范围修订；本记录是范围授权落实，不声明后续功能已实现或真实环境已验证。
+
 ## Revision Log
+
+- 2026-09-20: CR-20260920-001，补充回归可靠性与存储故障检测、隔离和恢复契约；保留原历史决策与阶段主目标。
 
 - 2026-05-14: Rebaseline governance metadata to support living-document updates and machine-checked frozen sections.
 
@@ -235,7 +316,7 @@ Resolution:
 
 - Status: Approved
 - Reviewer: Human
-- Decision Date: 2026-05-12
+- Decision Date: 2026-09-20
 
 ### Human Decisions
 
@@ -254,14 +335,20 @@ Resolution:
 - Regression metadata 统一使用一个 schema version。
 - Verdi debug 所需设计数据库应由 VCS adapter 生成路径。
 
+- 任务调度状态、验证 verdict 与证据完整性分别记录；结果检查器保留工程语义，通用核心统一汇总必需检查。
+- 编译能力从编译元数据读取；不隐式更新源码或清理旧回归。输出按任务与 attempt 隔离，重跑保持来源关联。
+- 实际执行节点必须验证存储与工具环境；存储故障有限等待、隔离受影响资源，恢复不得覆盖原证据或在旧 job 状态未知时重复派发。
+
 ### Human Review Notes
 
 - None
 
 ### Approval Decision
 
+CR-20260920-001 scope approved by Human on 2026-09-20; applied to the requirements in this document. Historical baseline approval follows.
+
 This architecture is approved as the Stage 0 Phase 3 baseline.
 
 ### Notes
 
-- None
+- CR-20260920-001：已落实用户授权的回归与存储可靠性修订；新增要求按路线图分阶段实现。

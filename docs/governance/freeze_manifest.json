@@ -8,17 +8,23 @@
     {
       "stage": "Stage 0",
       "phase": "Phase 1",
-      "freeze_commit": "ec0193650600e6601272545fefee2807e03a6a0b"
+      "freeze_commit": "905e0bfee771f5f572ac8df44bfc3d79c0de8f91",
+      "previous_freeze_commit": "ec0193650600e6601272545fefee2807e03a6a0b",
+      "change_request": "CR-20260920-001"
     },
     {
       "stage": "Stage 0",
       "phase": "Phase 2",
-      "freeze_commit": "6cd81720350a8399e050b2d46051b4c1193742f5"
+      "freeze_commit": "905e0bfee771f5f572ac8df44bfc3d79c0de8f91",
+      "previous_freeze_commit": "6cd81720350a8399e050b2d46051b4c1193742f5",
+      "change_request": "CR-20260920-001"
     },
     {
       "stage": "Stage 0",
       "phase": "Phase 3",
-      "freeze_commit": "d416db31d4fa5e9ee1516210967f3e31954fb2d3"
+      "freeze_commit": "905e0bfee771f5f572ac8df44bfc3d79c0de8f91",
+      "previous_freeze_commit": "d416db31d4fa5e9ee1516210967f3e31954fb2d3",
+      "change_request": "CR-20260920-001"
     },
     {
       "stage": "Stage 0",
@@ -33,7 +39,9 @@
     {
       "stage": "Stage 0",
       "phase": "Phase 6",
-      "freeze_commit": "f5a198baef6f050cb8507760e217b5811bccd0b0"
+      "freeze_commit": "905e0bfee771f5f572ac8df44bfc3d79c0de8f91",
+      "previous_freeze_commit": "f5a198baef6f050cb8507760e217b5811bccd0b0",
+      "change_request": "CR-20260920-001"
     }
   ],
   "files": [

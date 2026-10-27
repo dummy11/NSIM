@@ -8,7 +8,7 @@
 - ASIC 工程仓库及其本地元数据
 - 生成的仿真输出，例如 build、log、wave 和 report
 
-第一阶段的开发目标是建立一个小而可执行的基础系统：能够发现工程、识别版本、加载 case 和 submit 定义，并运行一次可追溯的本地回归。VCS、Verdi、DPI、FSDB、多进程和 LSF 支持应在工程模型稳定后分阶段加入。
+首个可运行版本的开发目标是建立一个小而可执行的基础系统：能够发现工程、识别版本、加载 case 和 submit 定义，并运行一次可追溯的本地回归。VCS、Verdi、DPI、FSDB、多进程和 LSF 支持在工程模型稳定后按功能逐步加入。
 
 ## 产品范围
 
@@ -97,40 +97,9 @@ ASIC 工程是一个独立版本管理的仓库或目录树，包含源文件和
 - 开始和结束时间
 - 结果摘要
 
-## 预期仓库结构
+## 仓库结构
 
-仓库后续应演进为以下结构：
-
-```text
-nsim/
-  pyproject.toml
-  README.md
-  AGENTS.md
-  docs/
-    plan.md
-    architecture.md
-    roadmap.md
-    freeze_log.md
-  src/
-    nsim/
-      __init__.py
-      cli.py
-      config/
-      discovery/
-      project/
-      regression/
-      scheduler/
-      simulator/
-      reports/
-      storage/
-  tests/
-    unit/
-    integration/
-  examples/
-    projects/
-```
-
-该结构只是规划说明，本次初始化不实现这些文件。
+NSIM 开发仓库包含 `pyproject.toml`、`src/nsim/`、`tests/`、`examples/`、`scripts/`、`docs/` 和 `user_guide.md`。安装包只交付 `nsim` Python 包及命令入口；工程源码与运行产物存放在独立位置。实际结构以仓库文件为准。
 
 ## 配置模型
 
@@ -162,7 +131,7 @@ nsim verdi open <run-id>
 
 ## 回归可靠性与恢复要求
 
-以下要求来自 CR-20260920-001，属于后续实现的验收输入。
+以下是回归可靠性与恢复的产品要求。
 
 - 测试通过必须有完整的结束证据和所需检查结果。仅正常退出、零 mismatch、未执行比较或日志缺失均不能替代有效检查；允许工程显式选择仅存活检查，但报告必须与功能通过区分。
 - 在任务规划时确定 seed，并保存 case、submit、plusargs、工程版本、工具版本、编译身份与配置快照。相同 seed 是复现条件之一，不单独保证结果完全一致。
@@ -181,119 +150,12 @@ nsim verdi open <run-id>
 
 已有脚本体现了显式 seed、逐 case 目录、失败清单、独立重跑、滚动并发、结果检查和原子报告写入。历史记录描述了 `/space8` 在部分 LSF 节点不可见及 VCS runtime 环境差异，通过选择兼容队列解决启动故障；并使用有限重读处理 NFS 日志可见性延迟。未发现物理硬盘损坏后自动恢复的实现。
 
-NSIM 将该工程作为首个真实接入候选；通用 CI 使用自建的最小 fake fixture，真实接入在相应 Stage 的环境门控下验证。静态 HTML/Markdown 报告属于文件产物，不引入 Web 服务。队列名、挂载路径、工具环境、存储阈值和恢复目标必须可配置，不能固化参考工程的环境值。
+NSIM 将该工程作为首个真实接入候选；通用 CI 使用自建的最小 fake fixture，真实接入在具备工具与 farm 的环境中验证。静态 HTML/Markdown 报告属于文件产物，不引入 Web 服务。队列名、挂载路径、工具环境、存储阈值和恢复目标必须可配置，不能固化参考工程的环境值。
 
 ## 开发原则
 
-- 按可 review 的阶段推进。
-- 进入下一阶段前冻结已 review 的基线。
 - 将仿真器相关逻辑封装在适配器边界之后。
 - 将工程发现与执行流程分离。
 - 优先依赖机器可读的运行元数据，而不是解析人工 log。
 - 先实现本地执行，再加入 LSF 扩展。
 - 将每次 regression 视为可审计 artifact。
-
-## Lifecycle
-
-Status: Living
-Baseline: Stage 0 v1
-Frozen Sections:
-- Human Decisions
-- Approval Decision
-
-Mutable Sections:
-- Notes
-- Open Questions
-- Review Trace
-- Revision Log
-- Clarifications that do not alter product scope or locked decisions
-
-## Review Trace
-
-### Review 2026-05-11
-
-Reviewer: Human
-Status: Approved
-
-Findings:
-- The plan establishes the Stage 0 product baseline.
-
-Required Changes:
-- None
-
-Resolution:
-- Approved as Stage 0 baseline.
-
-### Review 2026-09-20 CR-20260920-001
-
-Reviewer: Human
-Status: Approved
-
-Findings:
-- 用户已审阅回归经验和存储故障建议，并授权「行，都修改一下」。
-
-Required Changes:
-- 将已讨论要求纳入本文件，并与产品、架构和路线图同步。
-
-Resolution:
-- 按 CR-20260920-001 批准范围修订；本记录是范围授权落实，不声明后续功能已实现或真实环境已验证。
-
-## Revision Log
-
-- 2026-09-20: CR-20260920-001，补充回归可靠性与存储故障检测、隔离和恢复契约；保留原历史决策与阶段主目标。
-
-- 2026-05-14: Rebaseline governance metadata to support living-document updates and machine-checked frozen sections.
-
-## File-Level Human Review
-
-### Project-Level References
-
-- None
-
-### Review Metadata
-
-- Status: Approved
-- Reviewer: Human
-- Decision Date: 2026-09-20
-
-### Human Decisions
-
-- `nsim` 是以 Python CLI 工具形态交付，而不是服务端平台或 Web 应用。
-- ASIC 工程可以通过一个明确的工程描述文件被发现和识别。
-- ASIC 工程自身继续维护源码、filelist、testbench、DPI 源码和已有脚本。
-- 仿真输出默认可以写入工程目录之外的独立 output root。
-- submit JSON 是仿真选项矩阵的主要组织方式。
-- caselist 是 testcase 集合的主要组织方式。
-- 初期可用 fake simulator 和本地多进程调度验证核心流程，不要求立即接入真实 VCS、Verdi 或 LSF。
-- 真实 EDA 工具相关测试需要通过环境门控运行，普通 CI 不假设存在 VCS、Verdi 或 LSF。
-- regression 可追溯性优先依赖文件快照、hash 和机器可读 metadata，而不是人工命名约定。
-- 工程描述文件的文件名和格式固定为 `nsim.yaml` 或 `nsim.toml`。
-- caselist 采用纯文本。
-- submit JSON 的 schema 由 `nsim` 强约束。
-- ASIC 工程 tag 优先使用 git tag 或 commit SHA。
-- output root 的默认位置应来自用户配置或环境变量。
-- VCS compile 按 submit 独立执行。
-- FSDB dump 由 submit 和 testbench plusarg 共同配合控制。
-- DPI 编译产物默认工程共享，也可以通过 submit 控制为按 regression/run 隔离生成。
-- LSF 队列、资源和 license 约束可以通过 submit 控制，也可以通过 `nsim` 命令行控制。
-- regression metadata 的长期存储先保持文件形式。
-- 不同的项目下，`nsim` 可以使用不同的版本。
-- DPI 的编译使用独立的 Makefile，编译结果以 `.so` 的形式存在。
-
-- 有效通过要求完整执行证据与必需检查实际通过；仅存活检查须显式选择并单独标识。
-- 规划时记录 seed 和输入/编译身份，重跑创建关联的新 attempt 并保留原始证据。
-- 存储和执行环境故障与 DUT 失败分开，支持检测、隔离、有界重试及在已配置健康存储上从可信输入重跑；不负责修盘或备份。
-
-### Human Review Notes
-
-- None
-
-### Approval Decision
-
-CR-20260920-001 scope approved by Human on 2026-09-20; applied to the requirements in this document. Historical baseline approval follows.
-
-This plan is approved as the Stage 0 baseline.
-
-### Notes
-
-- CR-20260920-001：补充可靠性与存储恢复要求后再进入 Stage 1；本次不生成实现代码。

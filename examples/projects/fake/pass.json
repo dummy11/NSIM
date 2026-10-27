@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "name": "baseline",
+  "adapter": "fake",
+  "required_checks": ["functional", "golden", "performance"],
+  "timeout_seconds": 5,
+  "fake": {"durations": {"long_case": 0.2}}
+}

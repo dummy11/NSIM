@@ -1,0 +1,4 @@
+# One case per line. Blank lines and comments are ignored.
+smoke
+arithmetic
+long_case

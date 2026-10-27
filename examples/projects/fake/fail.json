@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "name": "fault-demo",
+  "adapter": "fake",
+  "required_checks": ["functional", "golden", "performance"],
+  "timeout_seconds": 5,
+  "fake": {"outcomes": {"arithmetic": "no_compare", "long_case": "performance_fail"}}
+}

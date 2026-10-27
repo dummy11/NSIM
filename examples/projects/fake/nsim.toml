@@ -1,0 +1,4 @@
+schema_version = 1
+name = "fake-example"
+requires_nsim = ">=0.1,<0.2"
+inputs = []

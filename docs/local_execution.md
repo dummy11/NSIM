@@ -4,16 +4,20 @@
 
 ## Project
 
-工程根目录恰好包含 `nsim.toml` 或 `nsim.yaml` 之一，两个同时存在时报错。TOML 示例：
+新项目使用 verification 根目录下的 `.nsim/nsim.toml` 和 `.nsim/.nsim_version`，通过 `nsim bootstrap` 登记；查询用 `nsim list/status`，更新用 `nsim update`。命令与路径规则见 [使用指南](../user_guide.md)。schema 2 的相对路径均相对 verification 根目录：
 
 ```toml
-schema_version = 1
+schema_version = 2
 name = "my-project"
-requires_nsim = ">=0.1,<0.2"
+rtl_root = "../rtl"
+rtl_filelist = "../rtl/rtl.f"
+verification_filelist = "filelist/tb.f"
 inputs = ["wrapper.py", "build/simv", "config.json"]
 ```
 
-`inputs` 是明确的文件列表，路径相对于描述文件。命令包装器使用的所有可变输入（脚本、二进制、数据、配置）必须列出。当前没有自动展开 filelist/include 图；未声明的输入或外部服务不在复现保证内。工程自身 git commit/tag、dirty 状态作为额外溯源信息保存，文件内容 hash 是当前重跑校验依据。
+工程名必须与 verification 目录名一致。`inputs` 是明确的文件列表。command 包装器使用的可变输入（脚本、二进制、数据、配置）必须列出；command 不自动解析 HDL 依赖。VCS 规划独立解析两套登记的 filelist，并为列出的文件、include/library 目录中的现有 HDL 文件记录哈希及目录成员。未声明的输入、编译器隐式输入和外部服务不在复现保证内。
+
+根目录的 schema 1 `nsim.toml/nsim.yaml` 继续可读，其路径仍相对描述文件；新旧布局同时存在报冲突。schema 1 的描述文件保留为重跑哈希依赖。schema 2 的描述文件保存为不可变计划快照，修改注册信息不会改绑历史计划；真实执行输入仍按原哈希校验。两套源码的 Git 身份分别作为溯源信息保存，Git commit 不替代文件内容校验。
 
 纯文本 caselist 每行一个标识，忽略空行和 `#` 注释、按出现顺序去重。标识允许字母、数字、下划线、点和连字符，必须以字母或数字开头，长度不超过 128。拒绝路径、空列表或一行多个名字。
 
@@ -86,9 +90,3 @@ inputs = ["wrapper.py", "build/simv", "config.json"]
 最终报告发布失败也保留在控制记录中并使整体未通过；后续 recover 在健康位置重新生成整批相关证据。完全丢失控制记录、依赖输入、或旧任务没有确定终态时停止自动恢复。
 
 退出码：0 为已通过/成功查询/成功 dry-run；1 为回归未通过；2 为配置、存储或完整性错误以及报告发布失败；130 为用户中断。没有可选择失败任务的重跑会返回空任务列表，并保留源批次的通过状态。
-
-## Review
-
-Status: Pending
-
-2026-09-20：依据用户在合并实现问题后回复「继续」创建，待实现整体 review。接口名称与字段尚未声明为长期稳定 API。

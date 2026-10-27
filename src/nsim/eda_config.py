@@ -35,10 +35,11 @@ def scheduler_config(value):
 
 def vcs_config(value):
     fields(value, {"executable", "filelist", "top", "compile_args", "run_args", "compile_timeout_seconds",
-                   "golden_enabled", "fsdb", "fsdb_plusargs", "fsdb_file", "dpi", "result_argv", "verdi"}, {"filelist"}, "vcs")
+                   "golden_enabled", "fsdb", "fsdb_plusargs", "fsdb_file", "dpi", "result_argv", "verdi"}, set(), "vcs")
     result = dict(value)
     result["executable"] = text(value.get("executable", "vcs"), "vcs.executable")
-    text(value["filelist"], "filelist")
+    if 'filelist' in value:
+        text(value['filelist'], 'filelist')
     if "top" in value:
         name(value["top"], "top")
     for key in ("compile_args", "run_args", "result_argv"):

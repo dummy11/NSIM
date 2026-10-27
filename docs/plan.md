@@ -118,8 +118,11 @@ CLI 后续应支持：
 
 ```bash
 nsim --version
-nsim project list
-nsim project inspect <project>
+nsim bootstrap --name verification --rtl-root <rtl> --rtl-filelist <rtl.f>
+nsim list
+nsim status
+nsim update --rtl-root <rtl> --rtl-filelist <rtl.f>
+nsim switch <version>
 nsim case list --project <project> --caselist <file>
 nsim run case --project <project> --case <name> --submit <submit.json>
 nsim run regression --project <project> --caselist <file> --submit <submit.json> --submit <other.json>

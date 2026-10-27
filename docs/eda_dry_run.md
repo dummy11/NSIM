@@ -32,11 +32,17 @@
 
 ## 通用配置
 
+新注册项目使用 `.nsim/nsim.toml` schema 2 的 `rtl_root`、`rtl_filelist`、`verification_filelist`。两份入口分别以各自源码根解析，嵌套 `-F` 切换到列表所在目录，`-f` 保持当前解析基准。VCS submit 省略 `vcs.filelist`（或写 `filelist/sim.f`），防止绕过登记输入。空清单无法规划。每次新规划重新收集文件及 include/library 目录成员，输入内容或已记录目录成员变化会阻止旧计划精确重跑。
+
+`verification/filelist/sim.f` 是组合来源说明，不直接交给 VCS；编译 token 固化在计划的 `submits[].vcs.filelist_tokens`，编译 argv 固化在 `commands.json`。同名用户文件不会被 bootstrap/update 覆盖。
+
+以下 `source_root` 规则适用于保留的 schema 1 外置描述文件示例。
+
 descriptor 新增可选 `source_root`，相对 descriptor 解析，默认 `.`；`inputs` 仍相对 descriptor 解析。这样无需在参考仓库写入 NSIM 文件。
 
 submit 的 `adapter: "vcs"` 接受 `vcs` 对象：
 
-- `filelist`：必需，相对 `source_root`。支持 `-f`、`-F`、`-v`、`-y`、`-top`、`+incdir+`、`+define+`、`+libext+` 和源文件。其它选项报错，需放入 `compile_args`。`-F` 内的路径相对该嵌套列表所在目录。
+- `filelist`：schema 1 必需，相对 `source_root`。支持 `-f`、`-F`、`-v`、`-y`、`-top`、`+incdir+`、`+define+`、`+libext+` 和源文件。其它选项报错，需放入 `compile_args`。`-F` 内的路径相对该嵌套列表所在目录。
 - `executable`、`compile_args`、`run_args`、`compile_timeout_seconds`、`top`。
 - `golden_enabled`：默认 false；required_checks 要求 golden 时必须显式 true，这个声明本身不证明比较有效。
 - `fsdb`、`fsdb_plusargs`、`fsdb_file`。默认波形在 `{wave_dir}/wave.fsdb`；相对文件名以隔离运行目录解析，工程必须支持相应 plusarg。
@@ -48,6 +54,6 @@ submit 的 `adapter: "vcs"` 接受 `vcs` 对象：
 
 `scheduler` 接受 kind local/lsf，queue、resources 字符串数组、licenses 正整数映射，以及 bsub/bjobs/bkill 路径和轮询/取消预算。CLI 的 `--scheduler`、`--queue`、重复 `--resource`、重复 `--license name=count` 覆盖 submit 对应字段；列表整体替换。工具缺失只在 `--dry-run` 时记录为 unresolved_tools。
 
-输入身份包含嵌套 filelist、列出的源码和 include/library 目录中现有的 `.v/.sv/.vh/.svh` 文件。它不是完整预处理依赖分析；新增目录文件、工具内置库、编译器隐式输入和外部服务仍需真实接入时补充身份约束。
+输入身份包含嵌套 filelist、列出的源码和 include/library 目录中现有的 `.v/.sv/.vh/.svh` 文件。它不是完整预处理依赖分析；schema 1 新增目录文件、工具内置库、编译器隐式输入和外部服务仍需补充身份约束；schema 2 已校验已登记 include/library 目录的 HDL 成员集合。
 
 LSF 参数语义参考 IBM 官方 [工作目录](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=options-cwd) 和 [作业输出字段](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=information-customize-job-output)。执行节点预检、未知 job 禁止重派和取消终态验证仍是执行适配器的后续验收项。

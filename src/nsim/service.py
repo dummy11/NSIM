@@ -38,14 +38,14 @@ def validate_roots(plan, roots, events):
     events = Path(events).resolve()
     if not roots:
         raise ConfigError("at least one output root is required")
-    source = Path(plan["project"]["root"])
+    sources = [Path(plan['project']['root']), *[Path(s['root']) for s in plan['project'].get('sources', {}).values()]]
     tool = Path(__file__).resolve().parent
     def nested(a, b):
         return a == b or a in b.parents or b in a.parents
     for root in roots:
-        if nested(root, events) or nested(root, source) or nested(root, tool):
+        if nested(root, events) or any(nested(root, source) for source in sources) or nested(root, tool):
             raise ConfigError("output, event, project and tool roots must be separate non-nested locations")
-    if nested(events, source) or nested(events, tool):
+    if any(nested(events, source) for source in sources) or nested(events, tool):
         raise ConfigError("event root must be outside project and tool trees")
     for index, root in enumerate(roots):
         if any(nested(root, other) for other in roots[index + 1:]):

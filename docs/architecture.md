@@ -41,7 +41,7 @@ Command Services
 
 ### Discovery Service
 
-通过扫描配置的搜索根目录并识别工程描述文件来发现 ASIC 工程。工程描述文件采用明确文件名和格式，当前基线允许 `nsim.yaml` 或 `nsim.toml`。Discovery Service 返回结构化工程身份，而不只是原始路径。
+项目通过 `nsim bootstrap` 初始化注册到用户级索引，`nsim list` 查询全部登记。`status/update/switch` 共用从当前目录向上查找最近 `.nsim` 的发现逻辑，也支持显式项目名称或路径。新项目使用 `.nsim/nsim.toml` schema 2；旧 schema 1 的 TOML/YAML 扫描读取继续兼容。损坏的最近项目不能被跳过；新旧布局冲突必须显式报错。
 
 ### Config Loader
 
@@ -52,11 +52,11 @@ Command Services
 - 纯文本 caselist
 - submit JSON 文件，并按 `nsim` 定义的 schema 强校验
 
-loader 应基于声明路径的配置文件本身来规范化相对路径，并识别工程对 `nsim` 版本的约束或选择。工程级 `nsim` 版本约束由工程描述文件声明。
+schema 2 的相对路径以 verification 根目录为基准，schema 1 保留描述文件所在目录的旧语义。工具版本只有 `.nsim/.nsim_version` 一个来源；新项目默认解析最新已安装可用稳定版本并保存具体版本号。注册索引仅保存名称与配置入口，配置修改采用锁及可恢复事务。稳定安装入口与项目 bootstrap/update 不复用命令含义。
 
 ### Project Model
 
-表示 ASIC 工程身份、版本 tag、源码根目录、支持的 caselist、submit 文件、filelist、DPI 源码、DPI Makefile、`nsim` 版本约束和仿真器默认值。工程 tag 优先来自 git tag 或 commit SHA。
+表示项目名称、verification 与 RTL 两套根目录、两套 filelist、显式执行输入以及工具版本。项目名来自 verification 目录名，在本机用户索引内唯一。注册不要求 RTL 版本；每次规划分别采集两套源码的 Git 身份和实际输入哈希。schema 2 的注册配置保存为计划快照，后续 update 不重绑历史回归；实际执行输入仍严格校验。
 
 ### Regression Planner
 

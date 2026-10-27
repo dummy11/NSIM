@@ -20,7 +20,7 @@ def expand(value, env):
     return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", replace, value)
 
 
-def filelist(path, root, env):
+def filelist(path, root, env, directories=None):
     inputs, output, active = set(), [], set()
     def resolve(token, cwd):
         return (cwd / expand(token, env)).resolve()
@@ -28,7 +28,10 @@ def filelist(path, root, env):
         if not (path.is_dir() if directory else path.is_file()):
             raise ConfigError(f"filelist input unavailable: {path}")
         if directory:
-            inputs.update(p.resolve() for p in path.rglob('*') if p.is_file() and p.suffix in ('.v', '.sv', '.vh', '.svh'))
+            members = sorted(p.resolve() for p in path.rglob('*') if p.is_file() and p.suffix in ('.v', '.sv', '.vh', '.svh'))
+            inputs.update(members)
+            if directories is not None:
+                directories[str(path)] = [str(p) for p in members]
         else:
             inputs.add(path)
         return str(path)
@@ -100,10 +103,26 @@ def prepare(submit, project, inputs, allow_missing):
             scheduler[key] = tool(scheduler[key], Path(submit['source']).parent, inputs, missing, allow_missing)
     if submit['adapter'] == 'vcs':
         config = submit['vcs']
-        path = (project.root / config['filelist']).resolve()
-        config['filelist'] = str(path)
-        config['filelist_tokens'], dependencies = filelist(path, project.root, submit['env'])
-        inputs.update(dependencies)
+        if project.schema_version == 2:
+            if 'filelist' in config and (project.root / config['filelist']).resolve() != project.root / 'filelist' / 'sim.f':
+                raise ConfigError('schema 2 uses registered filelists; omit vcs.filelist or set filelist/sim.f')
+            tokens = []
+            config['input_directories'] = {}
+            for path, root in ((project.rtl_filelist, project.rtl_root), (project.verification_filelist, project.root)):
+                resolved, dependencies = filelist(path, root, submit['env'], config['input_directories'])
+                if not resolved:
+                    raise ConfigError(f'filelist is empty; add sources before planning: {path}')
+                tokens.extend(resolved)
+                inputs.update(dependencies)
+            config['filelist'] = str(project.root / 'filelist' / 'sim.f')
+            config['filelist_tokens'] = tokens
+        else:
+            if 'filelist' not in config:
+                raise ConfigError('vcs.filelist is required for legacy projects')
+            path = (project.root / config['filelist']).resolve()
+            config['filelist'] = str(path)
+            config['filelist_tokens'], dependencies = filelist(path, project.root, submit['env'])
+            inputs.update(dependencies)
         config['executable'] = tool(config['executable'], Path(submit['source']).parent, inputs, missing, allow_missing)
         for key in ('compile_args', 'run_args', 'fsdb_plusargs', 'result_argv'):
             validate_templates(config[key])

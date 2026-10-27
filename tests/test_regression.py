@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from nsim.checks import evaluate
 from nsim.config import ConfigError, discover, load_cases, load_project, load_submit
-from nsim.planning import create_plan
+from nsim.planning import check_identity, create_plan
 from nsim.reports import load_final
 from nsim.service import replay, run
 from nsim.storage import IntegrityError, atomic_write, digest, preflight, write_json
@@ -72,10 +72,21 @@ class ConfigurationTests(Fixture):
         with self.assertRaises(ConfigError):
             load_project(self.project)
 
-    def test_version_requirement(self):
+    def test_old_version_requirement_is_rejected(self):
         self.descriptor.write_text('schema_version = 1\nname = "demo"\nrequires_nsim = ">=99"\n')
         with self.assertRaises(ConfigError):
             load_project(self.project)
+
+    def test_project_pin_rejects_wrong_runtime(self):
+        (self.project / ".nsim_version").write_text("99.0.0\n")
+        with self.assertRaisesRegex(ConfigError, "selected nsim version"):
+            self.plan()
+
+    def test_replay_identity_binds_current_python_environment(self):
+        plan = self.plan()
+        with patch("nsim.planning.sys.executable", str(self.base / "other-python")):
+            with self.assertRaisesRegex(ConfigError, "current Python environment"):
+                check_identity(plan)
 
     def test_unknown_fields_boolean_version_and_nan_rejected(self):
         for update in ({"typo": 1}, {"schema_version": True}, {"timeout_seconds": float("nan")}, {"required_checks": []}):
@@ -219,6 +230,18 @@ class RegressionTests(Fixture):
         (self.project / "input.txt").write_text("changed\n")
         with self.assertRaises(IntegrityError):
             replay(journal)
+
+    def test_switching_project_pin_preserves_old_replay(self):
+        from nsim import get_version
+        pin = self.project / ".nsim_version"
+        pin.write_text(get_version() + "\n")
+        self.data["fake"] = {"outcomes": {"fast": "fail"}}
+        self.save_submit()
+        journal, _ = self.launch()
+        pin.write_text("99.0.0\n")
+        other, rerun = replay(journal)
+        self.assertIsNotNone(other)
+        self.assertEqual(len(rerun["tasks"]), 1)
 
     def test_corrupted_result_invalidates_pass_and_can_recover(self):
         journal, state = self.launch()

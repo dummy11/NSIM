@@ -44,7 +44,10 @@ def check(directory, release=False):
     with tarfile.open(sources[0], "r:gz") as source:
         archive = {member.name: member for member in source.getmembers() if member.isfile()}
         prefix = f"{name}-{version}/"
-        for path in [root / "pyproject.toml", root / "README.md", *modules]:
+        for path in [root / "pyproject.toml", root / "README.md", root / "nsim-install.py",
+                     root / "user_guide.md", root / 'scripts/sync_project_layout.py',
+                     root / 'scripts/check_distribution.py',
+                     *sorted((root / 'docs').glob('*.md')), *modules]:
             relative = path.relative_to(root).as_posix()
             member = archive.get(prefix + relative)
             if member is None or source.extractfile(member).read() != path.read_bytes():

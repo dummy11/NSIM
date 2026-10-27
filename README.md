@@ -1,6 +1,6 @@
 # NSIM
 
-NSIM 是开发 `nsim` 的仓库与开发环境，包含源码、测试、示例工程、设计文档和阶段治理记录。`nsim` 是从这里构建和安装的 Python 命令行工具，面向 ASIC 工程组织仿真回归。当前工具提供可运行的本地流程：工程发现、配置校验、case × submit × seed 展开、滚动并发、结果检查、独立输出、失败重跑和备用存储恢复。
+NSIM 是开发 `nsim` 的仓库与开发环境，包含源码、测试、示例工程和设计文档。`nsim` 是从这里构建和安装的 Python 命令行工具，面向 ASIC 工程组织仿真回归。当前工具提供可运行的本地流程：工程发现、配置校验、case × submit × seed 展开、滚动并发、结果检查、独立输出、失败重跑和备用存储恢复。
 
 执行使用 fake simulator 或工程提供的命令包装器；新增 VCS、DPI、Verdi、LSF 配置与命令预览，见 [EDA dry-run](docs/eda_dry_run.md)。原生执行适配器仍未完成。合并实现授权和验证记录见 [实现状态](docs/implementation_status.md)。
 
@@ -16,13 +16,28 @@ python3 -m venv .venv
 .venv/bin/nsim version --json
 ```
 
-TOML/YAML 与版本约束分别使用 tomli（Python <3.11）、PyYAML 和 packaging。不同 ASIC 工程可使用独立虚拟环境安装不同版本。
+TOML/YAML 分别使用 tomli（Python <3.11）和 PyYAML。上面的 `.venv` 是开发环境；用户安装可使用根目录的 `nsim-install.py` 创建稳定 `nsim` 启动器，离线导入 wheel 及依赖，并由每个工程的 `.nsim/.nsim_version` 选择版本。
 
 版本控制、打包、发布及远端获取见 [使用指南](user_guide.md)；构建细节见 [打包与发布](docs/releasing.md)。
 
+## 注册和维护验证项目
+
+先按使用指南将候选 wheel 或离线包安装到版本目录，然后使用稳定 `nsim` 入口：
+
+```sh
+nsim bootstrap --name conv_verif --rtl-root /work/rtl --rtl-filelist /work/rtl/rtl.f
+nsim list
+cd conv_verif
+nsim status
+nsim update --rtl-root /work/rtl_next --rtl-filelist /work/rtl_next/rtl.f
+nsim switch latest
+```
+
+bootstrap 默认创建 `verification/`；`--name` 改变目录名。项目配置和版本文件统一位于 `.nsim/`，并创建 `submit/`、`filelist/tb.f` 和工具管理的组合来源说明。省略版本时只在新项目选择最新已安装稳定版。支持已有目录接入、子目录识别、重名保护、事务更新和缺失版本诊断。完整参数、路径语义与兼容行为见 [使用指南](user_guide.md)。
+
 ## 跑一次本地回归
 
-以下命令在 NSIM 仓库根目录执行。输出与控制事件目录必须预先存在，并位于工具和 ASIC 源码树之外。根目录缺失时不会自动创建，以免把掉线挂载误当成普通目录。
+以下命令使用保留的 schema 1 fake 示例，在 NSIM 仓库根目录执行。`project list <目录>` 是文件扫描，不会注册项目。输出与控制事件目录必须预先存在，并位于工具和 ASIC 源码树之外。根目录缺失时不会自动创建，以免把掉线挂载误当成普通目录。
 
 ```sh
 mkdir -p /tmp/nsim-output /tmp/nsim-backup /tmp/nsim-events
@@ -58,7 +73,7 @@ mkdir -p /tmp/nsim-output /tmp/nsim-backup /tmp/nsim-events
 
 `rerun` 仅重跑最终未通过的任务，默认保持原 seed、submit、显式环境和输入身份。`--seed` 可显式改变 seed，来源与变化保存在新计划中。`recover` 选择存储/证据不完整的任务；若整个报告发布失败，则重新运行相关任务以生成完整报告。两者都创建新运行和新 attempt，保留原日志、错误与来源关系。
 
-配置、声明的输入、命令可执行文件、`nsim` 源文件或已记录依赖版本变化时拒绝精确重跑。损坏的结果文件会让原通过结果显示为 INCOMPLETE；丢失或损坏的控制记录不允许自动恢复。控制器异常退出、旧任务状态未知时，也拒绝自动重叠派发。
+执行配置、声明的输入、命令可执行文件、`nsim` 源文件或已记录依赖版本变化时拒绝精确重跑。schema 2 注册配置使用历史快照，更新登记不替换旧回归的输入绑定。损坏的结果文件会让原通过结果显示为 INCOMPLETE；丢失或损坏的控制记录不允许自动恢复。控制器异常退出、旧任务状态未知时，也拒绝自动重叠派发。
 
 自动故障转移通过 `--retries`（默认 1）和 `--retry-seconds`（默认 120）限制。检测到存储 I/O 失败后，该输出根在本次运行内被隔离；新 attempt 可以使用尚未隔离的备用根。没有健康位置时保留失败，不盲目重复写故障盘。功能 FAIL 不自动重试。
 

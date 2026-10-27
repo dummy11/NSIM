@@ -6,13 +6,11 @@ import math
 from pathlib import Path
 import re
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
-from packaging.version import InvalidVersion, Version
+from nsim.project_paths import ProjectError, descriptor_path
+
 import yaml
-
-from nsim import get_version
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -97,21 +95,22 @@ class Project:
     descriptor: Path
     name: str
     inputs: List[Path]
-    requires_nsim: str
     source_root: Path
+    schema_version: int = 1
+    rtl_root: Optional[Path] = None
+    rtl_filelist: Optional[Path] = None
+    verification_filelist: Optional[Path] = None
 
     @property
     def root(self):
         return self.source_root
 
 
-def load_project(path: Path) -> Project:
-    path = path.resolve()
-    if path.is_dir():
-        candidates = [path / n for n in ("nsim.toml", "nsim.yaml") if (path / n).is_file()]
-        if len(candidates) != 1:
-            raise ConfigError(f"{path}: expected exactly one nsim.toml or nsim.yaml")
-        path = candidates[0]
+def load_project(path: Path, validate=True) -> Project:
+    try:
+        path = descriptor_path(path)
+    except ProjectError as exc:
+        raise ConfigError(str(exc)) from exc
     try:
         if path.name == "nsim.toml":
             data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -121,28 +120,44 @@ def load_project(path: Path) -> Project:
             raise ConfigError("project descriptor must be named nsim.toml or nsim.yaml")
     except (ValueError, yaml.YAMLError) as exc:
         raise ConfigError(f"{path}: {exc}") from exc
-    fields(data, {"schema_version", "name", "inputs", "requires_nsim", "source_root"}, {"schema_version", "name"}, "project")
-    if integer(data["schema_version"], "schema_version") != 1:
+    if not isinstance(data, dict):
+        raise ConfigError('project: expected an object')
+    schema = integer(data.get('schema_version'), 'schema_version')
+    if schema == 2:
+        fields(data, {'schema_version', 'name', 'inputs', 'rtl_root', 'rtl_filelist', 'verification_filelist'},
+               {'schema_version', 'name', 'rtl_root', 'rtl_filelist', 'verification_filelist'}, 'project')
+        if path.parent.name != '.nsim' or path.name != 'nsim.toml':
+            raise ConfigError('schema 2 requires verification/.nsim/nsim.toml')
+        root = path.parent.parent
+        if name(data['name'], 'project name') != root.name:
+            raise ConfigError('project name must match verification directory name')
+        resolved = {}
+        for key in ('rtl_root', 'rtl_filelist', 'verification_filelist'):
+            if not isinstance(data[key], str) or not data[key] or '\0' in data[key]:
+                raise ConfigError(f'{key}: expected a path string')
+            resolved[key] = (root / data[key]).resolve()
+        paths = [(root / p).resolve() for p in strings(data.get('inputs', []), 'inputs')]
+        if validate:
+            if not resolved['rtl_root'].is_dir():
+                raise ConfigError(f"rtl_root is not a directory: {resolved['rtl_root']}")
+            for p in [*paths, resolved['rtl_filelist'], resolved['verification_filelist']]:
+                if not p.is_file():
+                    raise ConfigError(f'project input is not a file: {p}')
+        return Project(path, data['name'], paths, root, schema, **resolved)
+    fields(data, {"schema_version", "name", "inputs", "source_root"}, {"schema_version", "name"}, "project")
+    if schema != 1:
         raise ConfigError("unsupported project schema version")
-    requirement = data.get("requires_nsim", ">=0.1,<0.2")
-    if not isinstance(requirement, str):
-        raise ConfigError("requires_nsim must be a version specifier string")
-    try:
-        if Version(get_version()) not in SpecifierSet(requirement):
-            raise ConfigError(f"project requires nsim {requirement}; installed {get_version()}")
-    except (InvalidSpecifier, InvalidVersion) as exc:
-        raise ConfigError(str(exc)) from exc
     paths = [(path.parent / x).resolve() for x in strings(data.get("inputs", []), "inputs")]
     for item in paths:
-        if not item.is_file():
+        if validate and not item.is_file():
             raise ConfigError(f"project input is not a file: {item}")
     source = data.get("source_root", ".")
     if not isinstance(source, str) or not source:
         raise ConfigError("source_root must be a path string")
     source_root = (path.parent / source).resolve()
-    if not source_root.is_dir():
+    if validate and not source_root.is_dir():
         raise ConfigError(f"source_root is not a directory: {source_root}")
-    return Project(path, name(data["name"], "project name"), paths, requirement, source_root)
+    return Project(path, name(data["name"], "project name"), paths, source_root)
 
 
 def discover(roots: List[Path]) -> List[Project]:

@@ -13,6 +13,8 @@ from nsim.planning import create_plan
 from nsim.reports import load_final, markdown
 from nsim.service import replay, run
 from nsim.storage import IntegrityError, preflight
+from nsim.project_paths import ProjectError, resolve_root
+from nsim import projects as project_admin
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +23,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version="%(prog)s " + get_version())
     commands = parser.add_subparsers(dest="command")
+    project_admin.add_commands(commands)
+    capabilities = commands.add_parser('capabilities', help='supported project schemas')
+    capabilities.add_argument('--json', action='store_true')
     info = commands.add_parser("version", help="Show the tool version for provenance records")
     info.add_argument("--json", action="store_true", help="Emit machine-readable tool identity")
     project = commands.add_parser("project", help="Discover or inspect project descriptors")
@@ -76,15 +81,20 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == 'capabilities':
+        print(json.dumps({'version': get_version(), 'project_schemas': [1, 2]}))
+        return 0
     if args.command == "version":
         identity = {"tool": "nsim", "version": get_version()}
         print(json.dumps(identity, sort_keys=True) if args.json else "nsim " + identity["version"])
         return 0
     try:
+        if args.command in ('bootstrap', 'list', 'status', 'update', 'switch'):
+            return project_admin.dispatch(args)
         if args.command == "project":
             projects = discover(args.roots) if args.action == "list" else [load_project(args.path)]
-            print(json.dumps([{"name": p.name, "root": str(p.root), "inputs": [str(i) for i in p.inputs],
-                               "requires_nsim": p.requires_nsim} for p in projects], indent=2))
+            print(json.dumps([{"name": p.name, "root": str(p.root), "inputs": [str(i) for i in p.inputs]}
+                              for p in projects], indent=2))
             return 0
         if args.command == "storage":
             print(json.dumps(preflight(args.root.resolve(), args.min_free_bytes, args.min_free_inodes), indent=2))
@@ -104,7 +114,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     overrides['licenses'] = {k: int(v) for k, v in (item.split('=', 1) for item in args.license)}
                 except ValueError as exc:
                     raise ConfigError('--license requires resource=positive-integer') from exc
-            plan = create_plan(args.project, caselist=getattr(args, "caselist", None),
+            plan = create_plan(resolve_root(args.project), caselist=getattr(args, "caselist", None),
                                cases=[args.case] if args.action == "case" else None,
                                submit_paths=args.submit, seeds=args.seed, allow_missing_tools=args.dry_run, scheduler_overrides=overrides)
             journal, state = run(plan, roots, events, jobs=args.jobs, retries=args.retries,
@@ -123,7 +133,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if state.get("dry_run"):
             return 0
         return 0 if state["passed"] else 2 if state.get("report_errors") else 1
-    except (OSError, ConfigError, IntegrityError, UnicodeError) as exc:
+    except (OSError, ConfigError, ProjectError, IntegrityError, UnicodeError) as exc:
         print(f"nsim: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:

@@ -50,6 +50,24 @@ class LsfTests(Fixture):
         with state_file(self.farm) as state:
             state.update(values)
 
+    def test_worker_consumes_declared_file_and_records_phase_identity(self):
+        data = self.base / 'external_stimulus.txt'
+        data.write_text('recorded input')
+        self.data['files'] = {'stimulus': {'path': str(data), 'phases': ['simulate']}}
+        self.data['hooks'] = {'pre_sim': {'name': 'read_input', 'argv': [sys.executable, '-c',
+            'from pathlib import Path; import sys; assert Path(sys.argv[1]).read_text() == "recorded input"',
+            '{file:stimulus}']}}
+        self.save_submit()
+        plan = create_plan(self.project, cases=['smoke'], submit_paths=[self.submit], seeds=[42])
+        record, state = run(plan, [self.out])
+        self.assertTrue(state['passed'], state)
+        requests = list(Path(record).rglob('request.json'))
+        self.assertTrue(requests)
+        request = json.loads(requests[0].read_text())
+        self.assertIn(str(data), request['plan']['input_hashes'])
+        self.assertNotIn(str(data), request['plan']['submits'][0]['build_inputs'])
+        self.assertIn(str(data), request['stage']['read_only_roots'])
+
     def stop_workers(self):
         state = self.farm_state()
         for job in state['jobs'].values():

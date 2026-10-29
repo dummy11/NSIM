@@ -258,7 +258,9 @@ conv_verif/
 │   │   ├── zebu.json
 │   │   └── palladium.json
 │   ├── submit_demo.json
-│   └── submit_demo.md
+│   ├── submit_demo.md
+│   ├── demo_inputs/          # coverage/Xprop/partition/UCLI/数据/分析规则
+│   └── examples/             # VCS 全字段、command、fake 参考
 ├── caselist/
 │   ├── 00_legacy.caselist
 │   ├── 01_uvm.caselist
@@ -408,7 +410,11 @@ nsim submit check rtl_debug
 }
 ```
 
-`extends` 相对声明它的 JSON 所在目录解析，只允许一层、一个父文件。对象递归合并；数组整体替换；每个 hook 阶段也整体替换，`[]` 可清空该阶段。空对象不会清空父对象，`null` 不是通用删除操作。合并完成后再校验配置，命令行调度选项覆盖合并后的值。
+`extends` 相对声明它的 JSON 所在目录解析，只允许一层、一个父文件。对象递归合并；数组整体替换；每个 hook 阶段也整体替换，`[]` 可清空该阶段。空对象不会清空父对象，`null` 不是通用删除操作，但 `files.NAME: null` 可删除继承的文件条目。合并完成后再校验配置，命令行调度选项覆盖合并后的值。
+
+辅助输入可在 submit 的 `files` 表登记，使用 `{file:名称}` 在参数、hooks 和用例值中引用。path、dependencies 相对工程根；phases 区分 compile、simulate、analysis。目录和 glob 追踪成员集合；内容摘要、受限小文件快照及各阶段输入进入计划。运行专用文件变化后，新计划仍可复用兼容编译；旧计划精确重跑会拒绝变化。`error_filter` 支持原来的 submit 相对路径，也支持 analysis 文件引用。`submit show/check` 检查显式文件并展示解析路径。
+
+新 bootstrap 的 `submit_demo.json` 显式展示完整文件管理用法，配套 `demo_inputs/` 教学文件可用于命令预览；DUT 层次、YOUR_* 和工具参数仍需按工程修改。`examples/vcs_full.json` 展示全部可选 VCS/调度/hooks/DPI 字段，command 与 fake 示例独立保存。已有文件及已注册项目保持不变。日常 `submit new` 继续生成最小差异配置。
 
 填写真实 RTL/TB 清单并准备输出根后，可在项目内预览：
 

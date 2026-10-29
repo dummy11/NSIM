@@ -2,13 +2,14 @@
 
 from copy import deepcopy
 from pathlib import Path
+import re
 
 from nsim.config import ConfigError, fields, integer, read_json
 
 
 SUBMIT_FIELDS = {'schema_version', 'name', 'adapter', 'argv', 'env', 'plusargs', 'required_checks',
                  'timeout_seconds', 'settle_seconds', 'fake', 'vcs', 'scheduler', 'mode', 'compile',
-                 'hooks', 'log_analysis', 'extends', 'case_defaults'}
+                 'hooks', 'log_analysis', 'extends', 'case_defaults', 'files'}
 
 
 def merge(parent, child, trail=()):
@@ -57,11 +58,12 @@ def anchor_tools(data, directory):
         reference = analysis['error_filter']
         if not reference.strip() or '\0' in reference:
             raise ConfigError('log_analysis.error_filter must be a non-empty file path')
-        analysis['error_filter'] = str((directory / reference).resolve())
+        if not reference.startswith('{file:'):
+            analysis['error_filter'] = str((directory / reference).resolve())
     return data
 
 
-def resolve_submit(path, source_bytes=None, *, file_contents=None):
+def resolve_submit(path, source_bytes=None, *, file_contents=None, project_root=None):
     path = path.resolve()
     sources = {}
 
@@ -95,12 +97,25 @@ def resolve_submit(path, source_bytes=None, *, file_contents=None):
         sources[str(parent_path)] = parent_content
     sources[str(path)] = content
     result = merge(parent, anchor_tools(child, path.parent))
+    from nsim.submit_files import config, bind
+    result['files'] = config(result.get('files', {}))
     analysis = result.get('log_analysis')
     if isinstance(analysis, dict) and 'error_filter' in analysis:
         from nsim.error_filter import load
         reference = analysis['error_filter']
         if not isinstance(reference, str) or not reference.strip() or '\0' in reference:
             raise ConfigError('log_analysis.error_filter must be a non-empty file path')
+        if reference.startswith('{file:'):
+            if not re.fullmatch(r'\{file:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\}', reference):
+                raise ConfigError('error_filter requires a complete {file:NAME} reference')
+            if project_root is None:
+                from nsim.project_paths import find_root
+                from nsim.config import load_project
+                discovered = find_root(path.parent)
+                if discovered is None:
+                    raise ConfigError('error_filter file reference requires an explicit or discoverable project')
+                project_root = load_project(discovered, validate=False).root
+            reference = bind(reference, result['files'], project_root, 'analysis', literal=True)
         rule_path = Path(reference)
         if rule_path.is_symlink() or not rule_path.is_file():
             raise ConfigError(f'error_filter must be a regular file: {rule_path}')

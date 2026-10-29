@@ -191,9 +191,9 @@ def load_cases(path: Path) -> List[str]:
     return list(dict.fromkeys(record['case'] for record in load_caselist(path)))
 
 
-def load_submit(path: Path, source_bytes=None, *, file_contents=None) -> Dict[str, Any]:
+def load_submit(path: Path, source_bytes=None, *, file_contents=None, project_root=None) -> Dict[str, Any]:
     from nsim.submit_config import SUBMIT_FIELDS, resolve_submit
-    data = resolve_submit(Path(path), source_bytes, file_contents=file_contents)
+    data = resolve_submit(Path(path), source_bytes, file_contents=file_contents, project_root=project_root)
     fields(data, SUBMIT_FIELDS - {'extends'},
            {"schema_version", "name", "adapter"}, "submit")
     if integer(data["schema_version"], "schema_version") != 1:
@@ -269,4 +269,6 @@ def load_submit(path: Path, source_bytes=None, *, file_contents=None) -> Dict[st
             raise ConfigError("required golden check needs explicit vcs.golden_enabled=true")
     elif "vcs" in data:
         raise ConfigError("vcs settings require the vcs adapter")
+    from nsim.submit_files import validate_references
+    validate_references(result)
     return result

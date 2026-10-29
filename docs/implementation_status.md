@@ -4,6 +4,18 @@
 
 本页按 2026-10-29 工作区整理。`pyproject.toml` 版本仍为候选 `0.1.0`；本地代码、测试通过与远端发布是独立状态。下文各次测试及构建记录只描述当时快照，不能自动延伸到后续改动。
 
+## 2026-10-29 Submit 文件管理与完整 bootstrap 示例
+
+新增 submit `files` 输入表及 `{file:NAME}` 引用。文件、目录、glob 与显式子依赖统一按验证工程根解析，按 compile/simulate/analysis 记录内容摘要与成员集合；同名声明可继承覆盖，null 删除继承项。小文件保存有界 base64 快照，snapshot=false 仍追踪内容身份。普通参数、hooks、DPI 输入和用例配置支持文件引用，错误名称和阶段不匹配会拒绝；error_filter 保留旧路径语义，并支持 analysis 文件引用。
+
+编译身份只加入 compile 文件，运行和分析输入的内容变化允许新计划复用兼容编译；原有 project.inputs 继续作为保守的编译依赖。精确重跑校验全部已登记输入和目录成员，符号链接改指向也会拒绝。local/LSF 共用输入校验和只读保护，工程外输入及空输入目录不能被执行进程写入或输出目录覆盖。show/check 展示 resolved_files 并检查显式输入，dry-run 展示文件与各阶段摘要。
+
+bootstrap 现在生成 19 个 submit 相关文件：公共 mode 模板、显式展示文件管理的 submit_demo.json、完整语法说明、VCS 全字段/command/fake 参考，以及 coverage hierarchy、Xprop、partition、UCLI 子脚本、HEX 和分析规则教学输入。已有用户文件和已注册工程不自动覆盖；submit new 继续生成最小差异配置。示例中的 DUT 层次、YOUR_* 与工具选项需按实际工程配置。
+
+验证：改动前全量基线 381 项通过；完成后全量 unittest **405 项通过（289.610 秒）**。覆盖按阶段编译复用、多 submit 隔离、继承删除、目录/glob 变化、符号链接、二进制快照、带空格/花括号路径、case/CLI 引用、实际 command 消费、外部输入只读保护，以及本地进程级 LSF worker。bootstrap 项目测试、生成文档一致性、JSON 与文档链接检查通过；wheel/sdist 构建与逐文件分发校验通过。
+
+边界：files 管理已存在的输入，不提供通用生成任务 DAG、partition 持久增量缓存、coverage 自动合并或独立重新分析入口。生成文件与可写产物仍由 command/hooks 及 compile.artifacts 管理。原生 VCS 仍仅 dry-run；未执行真实商业 EDA、真实 LSF 集群或跨主机共享存储验收。
+
 ## 2026-10-29 日志源码位置解析修复
 
 修复了位置解析把 `at dir with spaces/file.sv:123` 误写成 `spaces/file.sv:123`，以及把 `at /home/user/rtl/top.sv:123` 丢失开头 `/` 的问题。解析器现在优先使用引号或明确的 `at` 边界识别含空格路径；对无可靠边界的文字不猜测源码路径，保留日志文件与行号供排查。既有无空格路径及括号行号形式继续支持。扫描预算超限与分析失败的原因分类仍待处理。

@@ -276,8 +276,12 @@ class ProjectTests(unittest.TestCase):
                            '-o', output, '--dry-run', cwd=root)
         record = Path(json.loads(preview.stdout)['record_dir'])
         plan = json.loads((record / 'plan.json').read_text())
-        self.assertEqual(plan['submits'][0]['source_chain'], [str(common / 'rtl.json'), str(demo)])
+        self.assertEqual(plan['submits'][0]['source_chain'][:2], [str(common / 'rtl.json'), str(demo)])
         self.assertIn(str(common / 'rtl.json'), plan['input_hashes'])
+        self.assertIn(str(root / 'submit/demo_inputs/vcs/coverage.hier'), plan['submits'][0]['build_inputs'])
+        self.assertNotIn(str(root / 'submit/demo_inputs/ucli/run.tcl'), plan['submits'][0]['build_inputs'])
+        self.assertIn(str(root / 'submit/demo_inputs/ucli/includes/waves.tcl'), plan['input_hashes'])
+        self.assertTrue((root / 'submit/examples/vcs_full.json').is_file())
         self.assertFalse(json.loads((record / 'commands.json').read_text())['executed'])
 
     def test_bootstrap_preserves_existing_common_and_demo_and_is_idempotent(self):

@@ -30,7 +30,8 @@ Linux 后端基于 [Bubblewrap 的只读绑定挂载接口](https://github.com/c
 
 `commands.json` 的 `read_only_environment` 标记执行所需保护，dry-run 的 `enforced` 始终为 false。
 实际执行记录的 `read_only_environment` 保存使用的后端和受保护路径；没有成功建立保护的任务不能
-据此宣称运行通过。只读访问控制不代替 filelist/`project.inputs` 的输入哈希与重跑校验。
+据此宣称运行通过。只读访问控制不代替 filelist/`project.inputs`/submit `files` 的输入哈希与重跑校验。
+submit `files` 显式引用的工程外文件和目录也加入执行进程的只读保护；这些输入不能与输出目录重叠。
 
 ## 验证边界
 

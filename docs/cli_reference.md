@@ -17,7 +17,7 @@
 | `nsim project inspect PATH` | 读取指定工程描述文件 | `PATH` 必填 |
 | `nsim submit new NAME` | 创建继承公共模板的 submit | `NAME` 必填，可带 `.json` |
 | `nsim submit show SUBMIT` | 展示合并后的配置与来源 | `SUBMIT` 必填 |
-| `nsim submit check SUBMIT` | 校验 submit 字段与继承 | `SUBMIT` 必填 |
+| `nsim submit check SUBMIT` | 校验 submit 字段、继承与显式文件输入 | `SUBMIT` 必填 |
 | `nsim com` | 只编译或准备编译输入 | 无 |
 | `nsim sim` | 使用已有编译产物仿真并检查结果 | 无 |
 | `nsim run` | 编译、仿真及结果检查 | 无 |
@@ -175,7 +175,7 @@
 
 `MODE` 可选 `rtl`、`gate`、`fpga`、`haps`、`zebu`、`palladium`。这三个命令均输出 JSON，无需另加 `--json`。
 
-`SUBMIT` 支持工程 `submit/` 下的裸名称、带 `.json` 的名称或显式文件路径。当前目录存在同名文件时优先使用该文件；显式相对路径按调用目录解析。`check` 校验配置和继承；工程输入及命令预览用执行命令的 `--dry-run` 检查。
+`SUBMIT` 支持工程 `submit/` 下的裸名称、带 `.json` 的名称或显式文件路径。当前目录存在同名文件时优先使用该文件；显式相对路径按调用目录解析。`check` 校验配置、继承及 `files` 声明的存在性和成员集合；`show/check` 返回 `resolved_files`。RTL/TB 清单、工具及完整命令预览用执行命令的 `--dry-run` 检查。辅助文件的 `{file:NAME}` 引用、阶段和路径规则见 [Submit 语法](submit.md)。
 
 ## 编译、仿真与回归选项
 

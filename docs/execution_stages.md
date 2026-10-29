@@ -51,7 +51,7 @@ Linux 执行节点需要可用的 bubblewrap（bwrap）及 namespace 支持，ma
 无法建立保护时直接失败，不允许降级为可写执行，详见 [环境只读保护](read_only_environment.md)。
 
 只读限制属于 nsim 启动的进程，不修改源工程权限，也不会把普通终端中的符号链接变成只读挂载。
-重跑输入校验仍依据 filelist 和 `project.inputs`，不会自动把整个工程纳入输入哈希。
+重跑输入校验依据 filelist、`project.inputs` 和 submit 的 `files` 声明，不会自动把整个工程纳入输入哈希。
 源码清单的相对路径解析规则保持不变。
 
 ## 常用命令

@@ -16,6 +16,7 @@ from nsim.config import MODES, ConfigError, integer, load_project, load_submit, 
 from nsim.caselist import argument_groups, load_caselist, resolve_case, simple_case
 from nsim.storage import digest, encode, verify_files
 from nsim.project_paths import descriptor_path, resolve_root
+from nsim import submit_files
 
 
 def git_identity(root):
@@ -41,6 +42,7 @@ def runtime_identity():
 def check_identity(plan):
     verify_files(plan["input_hashes"])
     for submit in plan['submits']:
+        submit_files.verify(submit.get('resolved_files', {}))
         for directory, expected in submit.get('vcs', {}).get('input_directories', {}).items():
             if not Path(directory).is_dir():
                 raise ConfigError(f'input directory unavailable: {directory}')
@@ -147,7 +149,7 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
     for path in submit_paths:
         path = Path(path).resolve()
         submit_sources = {}
-        submit = load_submit(path, submit_sources)
+        submit = load_submit(path, submit_sources, project_root=project.root)
         if mode is None:
             mode = submit['mode']
         if submit['mode'] != mode:
@@ -161,10 +163,14 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
             inputs.add(Path(source))
         submit["source"] = str(path)
         submit['source_chain'] = list(submit_sources)
+        submit['resolved_files'] = submit_files.collect(submit['files'], project.root)
+        submit_files.bind_submit(submit, project.root)
         local_inputs = set(project.inputs)
+        local_inputs.update(submit_files.phase_inputs(submit['resolved_files'], 'compile'))
+        runtime_inputs = set()
         if submit["adapter"] == "command":
-            if not project.inputs:
-                raise ConfigError("command adapter requires explicit project inputs for replay verification")
+            if not project.inputs and not submit['files']:
+                raise ConfigError("command adapter requires explicit project inputs or submit files for replay verification")
             exe = submit["argv"][0]
             generated = submit.get('compile') and exe.startswith('{build_dir}/') and exe[12:] in submit['compile']['artifacts']
             if not generated:
@@ -174,7 +180,9 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
                 if not exe or not Path(exe).is_file():
                     raise ConfigError(f"executable unavailable: {submit['argv'][0]}")
                 submit["argv"][0] = exe
-                local_inputs.add(Path(exe))
+                # A runner is a simulation input when compilation is a separate
+                # stage. Without compilation it is the prebuilt product itself.
+                (runtime_inputs if submit.get('compile') else local_inputs).add(Path(exe))
             arguments = [(arg, {'case', 'seed', 'result', 'project', 'wave_dir', 'build_dir'})
                          for arg in submit['argv'] + submit['plusargs']]
             if submit.get('compile'):
@@ -213,6 +221,9 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
         build_inputs = prepare(submit, project, local_inputs, allow_missing_tools)
         inputs.update(local_inputs)
         inputs.update(hook_inputs)
+        inputs.update(runtime_inputs)
+        for file_phase in ('simulate', 'analysis'):
+            inputs.update(submit_files.phase_inputs(submit['resolved_files'], file_phase))
         compile_inputs.append(build_inputs)
         submits.append(submit)
     if not submits or len({s["name"].casefold() for s in submits}) != len(submits):
@@ -225,9 +236,17 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
     tool_identity = {'version': runtime['version'], 'wheel_sha256': runtime['wheel_sha256'],
                      'files': {Path(p).name: value for p, value in runtime['files'].items()}}
     tasks = []
+    file_snapshots = {}
     for index, submit in enumerate(submits):
+        submit_files.verify(submit['resolved_files'])
+        file_snapshots.update(submit_files.snapshots(submit['resolved_files'], hashes))
+        submit['file_hashes'] = {file_phase: {str(p): hashes[str(p)] for p in
+                                  sorted(submit_files.phase_inputs(submit['resolved_files'], file_phase))}
+                                for file_phase in submit_files.PHASES}
         # Build identity deliberately excludes testcase, seed, workspace and runtime-only options.
         compile_config = {k: submit[k] for k in ('name', 'adapter', 'mode', 'compile', 'env')}
+        compile_config['files'] = {key: {field: item[field] for field in ('path', 'selections')}
+                                   for key, item in submit['resolved_files'].items() if 'compile' in item['phases']}
         compile_config['hooks'] = {key: submit['hooks'][key] for key in ('pre_compile', 'post_compile')}
         compile_config['log_analysis'] = {key: submit['log_analysis'][key] for key in
                                           ('compile_files', 'max_diagnostics', 'max_scan_bytes', 'settle_seconds')}
@@ -245,7 +264,9 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
         build_id = hashlib.sha256(encode({'config': compile_config, 'inputs': submit['build_inputs'],
                                          'project_root': str(project.root), 'runtime': tool_identity})).hexdigest()
         for case in dict.fromkeys(cases):
-            resolved = [resolve_case(record, submit, plusargs) for record in case_records[case]] if phase != 'com' else [{'argv': [], 'origins': {}}]
+            resolved = [resolve_case(submit_files.bind_tree(record, submit['files'], project.root, 'simulate'), submit,
+                                     submit_files.bind_tree(list(plusargs), submit['files'], project.root, 'simulate'))
+                        for record in case_records[case]] if phase != 'com' else [{'argv': [], 'origins': {}}]
             if any(argument_groups(value['argv']) != argument_groups(resolved[0]['argv']) for value in resolved[1:]):
                 sources = ', '.join(record['source'] for record in case_records[case])
                 raise ConfigError(f'conflicting definitions for logical case {case} in submit {submit["name"]}: {sources}')
@@ -274,5 +295,5 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
             "project": {"name": project.name,
             "root": str(project.root), "descriptor": str(project.descriptor),
             "selected_nsim": selected_version, 'sources': sources, **storage, **git_identity(project.root)},
-            "runtime": runtime, "input_hashes": hashes, "snapshots": snapshots,
+            "runtime": runtime, "input_hashes": hashes, "snapshots": snapshots, 'file_snapshots': file_snapshots,
             "environment": environment, "submits": submits, "tasks": tasks, "source": None}

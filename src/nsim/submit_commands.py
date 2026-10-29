@@ -35,7 +35,7 @@ def create(root, identifier, mode=None, parent=None):
         raise ConfigError('invalid submit mode')
     root = Path(root).resolve()
     with registry_lock(write=True), project_lock(root):
-        load_project(root, validate=False)
+        project = load_project(root, validate=False)
         target = root / 'submit' / (identifier + '.json')
         check_destination(target)
         if os.path.lexists(target):
@@ -52,13 +52,13 @@ def create(root, identifier, mode=None, parent=None):
         child = {'schema_version': 1, 'name': identifier, 'extends': reference}
         files[target] = pretty(child).encode('utf-8')
         contents = {str(p): data for p, data in files.items()}
-        resolved = resolve_submit(target, file_contents=contents)
+        resolved = resolve_submit(target, file_contents=contents, project_root=project.root)
         needs_argv = resolved.get('adapter') == 'command' and resolved.get('argv', []) == []
         validation_contents = dict(contents)
         if needs_argv:
             # Validate the rest of a hardware skeleton without inventing a platform command.
             validation_contents[str(target)] = pretty(dict(child, argv=['platform-command-to-configure'])).encode('utf-8')
-        effective = load_submit(target, file_contents=validation_contents)
+        effective = load_submit(target, file_contents=validation_contents, project_root=project.root)
         if mode is not None and effective['mode'] != mode:
             raise ConfigError(f"requested mode {mode} does not match parent mode {effective['mode']}")
         publish(root, files)
@@ -73,11 +73,14 @@ def inspect(root, path):
     with registry_lock(), project_lock(root):
         sources = {}
         try:
-            effective = load_submit(path, sources)
+            project = load_project(root, validate=False)
+            effective = load_submit(path, sources, project_root=project.root)
         except ConfigError as exc:
             raise ConfigError(f'{path}: {exc}') from exc
+        from nsim.submit_files import collect
+        resolved_files = collect(effective['files'], project.root)
         return {'path': str(path), 'configuration_valid': True, 'source_chain': list(sources),
-                'effective': effective}
+                'effective': effective, 'resolved_files': resolved_files}
 
 
 def dispatch(args):
@@ -91,6 +94,6 @@ def dispatch(args):
         if args.action == 'check':
             effective = result.pop('effective')
             result.update(name=effective['name'], mode=effective['mode'], adapter=effective['adapter'],
-                          message='Fields and inheritance are valid. Use run --dry-run to check project inputs and command previews.')
+                          message='Fields, inheritance and declared files are valid. Use run --dry-run to check source lists and command previews.')
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

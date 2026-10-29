@@ -92,6 +92,9 @@ def validate_layout(plan, roots):
                  *[Path(s['root']) for s in plan['project'].get('sources', {}).values()],
                  *[Path(p) for p in plan['input_hashes']],
                  *[root / 'regr_batch_dir' for root in roots]]
+    from nsim.submit_files import protected_paths
+    protected += [Path(path) for submit in plan['submits']
+                  for path in protected_paths(submit.get('resolved_files', {}))]
     if not isolated_regression(plan):
         protected += [root / 'regr_dir' for root in roots]
     else:

@@ -229,20 +229,22 @@ class SubmitInheritanceTests(Fixture):
         self.assertEqual(load_submit(self.submit)['argv'][0], '{build_dir}/simulator')
 
     def test_generated_examples_and_all_documented_json_parse(self):
+        folder = self.project / 'submit'
         for relative, content in scaffold().items():
-            target = self.project / relative
+            target = folder / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content)
-        default = load_submit(self.project / 'submit_demo.json')
+        default = load_submit(folder / 'submit_demo.json')
         self.assertEqual(default['mode'], 'rtl')
         self.assertFalse(default['vcs']['golden_enabled'])
         for mode in MODES:
-            child = dict(schema_version=1, name=mode + '_demo', extends='common/' + mode + '.json')
+            child = dict(schema_version=1, name=mode + '_demo', extends='submit/common/' + mode + '.json')
             if mode not in ('rtl', 'gate'):
                 child['argv'] = ['platform_runner']
             write_json(self.submit, child)
             self.assertEqual(load_submit(self.submit)['mode'], mode)
         for block in re.findall(r'```json\n(.*?)\n```', guide(), flags=re.S):
-            write_json(self.submit, json.loads(block))
-            load_submit(self.submit)
+            target = folder / 'check.json'
+            write_json(target, json.loads(block))
+            load_submit(target)
         self.assertEqual(guide(), (Path(__file__).resolve().parent.parent / 'docs' / 'submit.md').read_text())

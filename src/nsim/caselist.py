@@ -32,6 +32,9 @@ def field_name(key):
 def template(value, allowed):
     try:
         for _, key, spec, conv in string.Formatter().parse(value):
+            if key == 'file' and spec and not conv:
+                name(spec, 'file reference')
+                continue  # Resolved against the selected submit before case expansion.
             if key is not None and (key not in allowed or spec or conv):
                 raise ConfigError(f'invalid case placeholder: {value}')
     except ValueError as exc:

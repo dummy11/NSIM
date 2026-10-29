@@ -56,7 +56,10 @@ submit 的 `adapter: "vcs"` 接受 `vcs` 对象：
 
 `{log}` 指向仿真主日志 `run.log`。编译命令生成 `-l vcs.log`，仿真命令生成 `-l sim.log`（均使用各自输出目录的绝对路径），与 NSIM 汇总 stdout/stderr 的 `compile.log` / `run.log` 分开。自定义 VCS 参数不得重复提供 `-l`。原生 VCS 仍仅支持 dry-run；实际 command 包装器也应采用这个日志约定。
 
-其中 `vcs.compile_args` 仅允许 `{project}`、`{build_dir}`、`{dpi_library}`，避免一个共享编译目录被 case/seed 改变编译配置。
+其中 `vcs.compile_args` 允许 `{project}`、`{build_dir}`、`{dpi_library}` 和声明了 compile 阶段的 `{file:NAME}`，避免一个共享编译目录被 case/seed 改变编译配置。
+submit.files 的路径相对验证工程根，支持普通文件、目录、glob 和显式 dependencies；文件与成员摘要随计划校验。
+只有 compile 阶段文件进入编译身份，simulate/analysis 文件不会因内容变化单独触发重编译。
+commands.json 同时展示 files、file_references、file_hashes 和展开后的 argv；完整字段见 [Submit 语法](submit.md)。
 
 `scheduler` 接受 kind local/lsf（默认 lsf），queue、resources 字符串数组、licenses 正整数映射，以及 bsub/bjobs/bkill 路径和轮询/取消预算。CLI 的 `--scheduler`、`--queue`、重复 `--resource`、重复 `--license name=count` 覆盖 submit 对应字段；列表整体替换。工具缺失只在 `--dry-run` 时记录为 unresolved_tools。
 

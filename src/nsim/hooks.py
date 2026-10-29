@@ -53,11 +53,13 @@ def kill_group(process):
 
 def spec(plan, task, phase, build, work, argv, stdout, stderr, timeout):
     submit = plan['submits'][task['submit']]
+    from nsim.submit_files import protected_paths
     return dict(phase=phase, task={'case': task['case'], 'seed': task['seed']}, cwd=str(work), argv=argv,
                 stdout=str(stdout), stderr=str(stderr), timeout_seconds=timeout,
                 environment=dict(plan['environment'], **submit['env']), hooks=submit['hooks'],
                 read_only_roots=list(dict.fromkeys([plan['project']['root'],
-                    *[source['root'] for source in plan['project'].get('sources', {}).values()]])),
+                    *[source['root'] for source in plan['project'].get('sources', {}).values()],
+                    *protected_paths(submit.get('resolved_files', {}))])),
                 log_analysis=submit['log_analysis'], preparation=submit['adapter'], build_id=task['build_id'],
                 values=dict(project=plan['project']['root'], build_dir=str(build),
                             case=task['case'], seed=task['seed'], result=str(Path(work) / 'result.json'),

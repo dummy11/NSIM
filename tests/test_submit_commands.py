@@ -156,7 +156,7 @@ class SubmitCommandsTests(Fixture):
         self.assertEqual(plan['execution']['mode'], 'gate')
         self.assertEqual(plan['execution']['workspace'], 'gate')
 
-    def test_default_demo_does_not_block_future_common_defaults(self):
+    def test_full_demo_shows_files_and_new_submit_keeps_common_defaults(self):
         for relative, content in scaffold().items():
             path = self.folder / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -167,6 +167,10 @@ class SubmitCommandsTests(Fixture):
         raw['vcs'].update(fsdb=True, run_args=['+TRACE=1'])
         write_json(parent, raw)
         effective = load_submit(self.folder / 'submit_demo.json')
+        self.assertIn('coverage_hier', effective['files'])
+        self.assertIn('{file:ucli_script}', effective['vcs']['run_args'])
+        create(self.project, 'daily')
+        effective = load_submit(self.folder / 'daily.json')
         self.assertEqual(effective['plusargs'], ['+COMMON_OPTION=1'])
         self.assertEqual(effective['vcs']['run_args'], ['+TRACE=1'])
         self.assertTrue(effective['vcs']['fsdb'])

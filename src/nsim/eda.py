@@ -99,6 +99,7 @@ def validate_templates(arguments):
 def prepare(submit, project, inputs, allow_missing):
     missing = []
     controller_inputs = set()
+    analysis_inputs = set()
     scheduler = submit['scheduler']
     if scheduler['kind'] == 'lsf':
         for key in ('bsub', 'bjobs', 'bkill'):
@@ -137,7 +138,7 @@ def prepare(submit, project, inputs, allow_missing):
                 raise ConfigError('vcs.compile_args cannot depend on case, seed or simulation output')
         validate_templates(submit['plusargs'] + [config['fsdb_file']])
         if config['result_argv']:
-            config['result_argv'][0] = tool(config['result_argv'][0], Path(submit['source']).parent, inputs, missing, allow_missing)
+            config['result_argv'][0] = tool(config['result_argv'][0], Path(submit['source']).parent, analysis_inputs, missing, allow_missing)
         if config.get('dpi'):
             dpi = config['dpi']
             dpi['makefile'] = str((project.root / dpi['makefile']).resolve())
@@ -150,6 +151,7 @@ def prepare(submit, project, inputs, allow_missing):
     compile_inputs = set(inputs)
     submit['controller_inputs'] = [str(p) for p in sorted(controller_inputs - compile_inputs)]
     inputs.update(controller_inputs)
+    inputs.update(analysis_inputs)
     return compile_inputs
 
 
@@ -165,6 +167,9 @@ def commands(plan, task, root, attempt='preview'):
     result = dict(task=task['id'], case=task['case'], seed=task['seed'], submit=submit['name'],
                   build_id=task['build_id'], attempt=attempt, cwd=str(work), required_checks=submit['required_checks'],
                   unresolved_tools=submit.get('unresolved_tools', []), environment=submit['env'])
+    result['files'] = submit.get('resolved_files', {})
+    result['file_references'] = submit.get('file_references', [])
+    result['file_hashes'] = submit.get('file_hashes', {})
     if 'case_config' in task:
         result['case_config'] = task['case_config']
     if submit['adapter'] == 'vcs':

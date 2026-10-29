@@ -1,10 +1,12 @@
 """Sequential batches of ordinary regressions, with controller-owned summaries."""
 
 import argparse
+from datetime import datetime
 import hashlib
 import html
 import os
 from pathlib import Path
+import re
 import shlex
 import sys
 import time
@@ -41,6 +43,13 @@ def validate_outer(argv):
         raise ConfigError(f'batch options: put single-regression options inside the list; {exc}') from exc
 
 
+def new_batch_id(path):
+    """Add local creation time and a bounded list label without shortening UUIDs."""
+    stamp = datetime.now().strftime('%Y%m%dT%H%M%S')
+    label = re.sub(r'[^A-Za-z0-9_.-]+', '-', path.stem).strip('._-')[:48] or 'batch'
+    return f'{label}_{stamp}_{uuid.uuid4().hex}'
+
+
 def prepare_batch(outer):
     from nsim.cli import build_parser, prepare_execution
     from nsim.service import validate_roots
@@ -48,7 +57,7 @@ def prepare_batch(outer):
     content = path.read_bytes()
     source = content.decode('utf-8')
     source_hash = hashlib.sha256(content).hexdigest()
-    batch_id = uuid.uuid4().hex
+    batch_id = new_batch_id(path)
     entries = []
     parser = build_parser(RowParser)
     for line, raw in enumerate(source.splitlines(), 1):

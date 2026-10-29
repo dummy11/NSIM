@@ -14,6 +14,7 @@ import uuid
 from nsim.checks import ACCEPTED
 from nsim.case_records import make_record
 from nsim.config import ConfigError, integer, number
+from nsim.identifiers import new_regression_id
 from nsim.layout import (SimulationDirectories, is_regression, make_directory, build_directory,
                          record_directory, simulation_directory, validate_layout, isolated_regression,
                          workspace_directory)
@@ -369,8 +370,9 @@ def replay(source, roots=None, recovery=False, seed=None, **overrides):
     if not selected:
         return None, {"passed": state["passed"], "message": "no matching failed tasks", "tasks": []}
     plan = copy.deepcopy(original)
-    plan["id"] = uuid.uuid4().hex
-    if (is_regression(original) or isolated_regression(original)) and original['execution']['phase'] != 'com':
+    regression = is_regression(original) or isolated_regression(original)
+    plan["id"] = new_regression_id(plan.get('caselists', [])) if regression else uuid.uuid4().hex
+    if regression and original['execution']['phase'] != 'com':
         plan['kind'] = 'regression'
         plan['execution']['layout'] = 'isolated-regression-v1'
         if original['execution']['phase'] == 'sim':

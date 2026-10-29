@@ -13,6 +13,7 @@ import uuid
 
 from nsim import get_version
 from nsim.config import MODES, ConfigError, integer, load_project, load_submit, name
+from nsim.identifiers import new_regression_id
 from nsim.caselist import argument_groups, load_caselist, resolve_case, simple_case
 from nsim.storage import digest, encode, verify_files
 from nsim.project_paths import descriptor_path, resolve_root
@@ -283,7 +284,8 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
     if project.output_roots:
         storage['storage_defaults'] = {'output_roots': [str(p) for p in project.output_roots]}
     regression = bool(caselists or phase == 'regr' or len(tasks) > 1)
-    return {"schema_version": project.schema_version, "id": uuid.uuid4().hex,
+    run_id = new_regression_id(caselists) if regression else uuid.uuid4().hex
+    return {"schema_version": project.schema_version, "id": run_id,
             'execution': {'phase': phase, 'mode': mode, 'workspace': directory,
                           'com_dir': com_dir, 'sim_dir': sim_dir,
                           'layout': 'isolated-regression-v1' if regression and phase != 'com' else 'single-v1'},

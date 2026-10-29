@@ -21,7 +21,7 @@ class BatchIdentityTests(Fixture):
                                         '-seed', '42']) + '\n')
         self.args = build_parser().parse_args(['regr', '-rl', str(self.list),
             '--project', str(self.project), '-o', str(self.out), '--dry-run'])
-        clock = patch('nsim.batch.datetime')
+        clock = patch('nsim.identifiers.datetime')
         self.clock = clock.start()
         self.addCleanup(clock.stop)
         self.clock.now.return_value = datetime(2026, 10, 29, 15, 30, 0)

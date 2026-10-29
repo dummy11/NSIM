@@ -1,19 +1,17 @@
 """Sequential batches of ordinary regressions, with controller-owned summaries."""
 
 import argparse
-from datetime import datetime
 import hashlib
 import html
 import os
 from pathlib import Path
-import re
 import shlex
 import sys
 import time
 from urllib.parse import quote
-import uuid
 
 from nsim.config import ConfigError, read_json
+from nsim.identifiers import readable_id
 from nsim.layout import make_directory
 from nsim.planning import check_identity
 from nsim.storage import IntegrityError, atomic_write, digest, preflight, verify_files, write_json
@@ -45,9 +43,7 @@ def validate_outer(argv):
 
 def new_batch_id(path):
     """Add local creation time and a bounded list label without shortening UUIDs."""
-    stamp = datetime.now().strftime('%Y%m%dT%H%M%S')
-    label = re.sub(r'[^A-Za-z0-9_.-]+', '-', path.stem).strip('._-')[:48] or 'batch'
-    return f'{label}_{stamp}_{uuid.uuid4().hex}'
+    return readable_id(path.stem, 'batch')
 
 
 def prepare_batch(outer):

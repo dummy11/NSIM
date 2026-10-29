@@ -25,7 +25,7 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
     )
     add_argument(parser, "--version", action="version", version="%(prog)s " + get_version())
     add_argument(parser, '-o', '--output-root', dest='global_output_root', action='append', type=Path,
-                        help='Override output roots for com/sim/run/regr/rerun/recover')
+                        help='Select one output root for com/sim/run/regr/rerun/recover')
     commands = parser.add_subparsers(dest="command")
     project_admin.add_commands(commands)
     from nsim.submit_commands import add_commands
@@ -65,11 +65,13 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
         add_argument(execute, '-com-dir', default='com_dir', help='Compile path relative to workspace, or absolute path')
         add_argument(execute, '-sim-dir', default='sim_dir', help='Simulation parent relative to workspace, or absolute path')
         add_argument(execute, '-o', "--output-root", action="append", type=Path,
-                             help="Override project output roots; repeat to configure fallback storage")
+                             help="Select one output root for this run")
         add_argument(execute, '-j', '-jobs', "--jobs", type=int, default=1,
                              help='Maximum unfinished jobs across this invocation (default: 1)')
-        add_argument(execute, "--retries", type=int, default=1)
-        add_argument(execute, "--retry-seconds", type=float, default=120)
+        add_argument(execute, "--retries", type=int, default=0,
+                             help="Deprecated; automatic infrastructure retries are disabled (must be 0)")
+        add_argument(execute, "--retry-seconds", type=float, default=0,
+                             help="Deprecated; automatic infrastructure retries are disabled (must be 0)")
         add_argument(execute, "--min-free-bytes", type=int, default=0)
         add_argument(execute, "--min-free-inodes", type=int, default=0)
         add_argument(execute, "--dry-run", action="store_true")

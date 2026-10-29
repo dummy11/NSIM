@@ -151,17 +151,10 @@ def run_batch(batch, entries):
     for entry in entries:
         check_identity(entry['plan'])
     roots = [Path(p) for p in batch['output_roots']]
-    failures = []
-    selected = None
-    for root in roots:
-        try:
-            preflight(root, entries[0]['settings']['min_free_bytes'], entries[0]['settings']['min_free_inodes'])
-            selected = root
-            break
-        except OSError as exc:
-            failures.append(str(exc))
-    if selected is None:
-        raise OSError('no healthy batch output root: ' + '; '.join(failures))
+    if len(roots) != 1:
+        raise ConfigError('select exactly one output root for a regression batch')
+    selected = roots[0]
+    preflight(selected, entries[0]['settings']['min_free_bytes'], entries[0]['settings']['min_free_inodes'])
     base = selected / 'regr_batch_dir' / batch['id']
     make_directory(base.parent, selected)
     base.mkdir(exist_ok=False)
@@ -178,6 +171,18 @@ def run_batch(batch, entries):
             id=entry['plan']['id'], status='planned', record_dir=None,
             totals=dict(total=total, completed=0, passed=0, failed=0, running=0, pending=total, unknown=0)))
 
+    display_failed = False
+    def display(value):
+        nonlocal display_failed
+        if display_failed:
+            return
+        try:
+            write_json(journal / 'live.json', value)
+            atomic_write(journal / 'dashboard.html', batch_html(value, journal))
+        except OSError as exc:
+            display_failed = True
+            print(f'nsim: batch dashboard publication failed: {exc}', file=sys.stderr)
+
     def publish(message=''):
         counts(state)
         state['revision'] += 1
@@ -185,8 +190,7 @@ def run_batch(batch, entries):
         if message:
             state['message'] = message
         write_json(journal / 'state.json', state)
-        write_json(journal / 'live.json', state)
-        atomic_write(journal / 'dashboard.html', batch_html(state, journal))
+        display(state)
 
     current = None
     try:
@@ -212,8 +216,7 @@ def run_batch(batch, entries):
                          'revision', 'published_at', 'totals', 'regression_counts', 'task_count')}
                 brief.update(schema_version=2, regression_count=len(state['regressions']),
                              regressions=[dict(current)], partial=True)
-                write_json(journal / 'live.json', brief)
-                atomic_write(journal / 'dashboard.html', batch_html(brief, journal))
+                display(brief)
 
             record, child = run(entry['plan'], entry['roots'], **entry['settings'], on_progress=progress)
             current['record_dir'] = str(record)
@@ -252,8 +255,7 @@ def run_batch(batch, entries):
                                                files={name: digest(journal / name) for name in files}))
         # Display success only after the completion manifest is durable. Never
         # rewrite the now-hashed state.json while publishing the final view.
-        write_json(journal / 'live.json', state)
-        atomic_write(journal / 'dashboard.html', batch_html(state, journal))
+        display(state)
         return journal, state
     except BaseException as exc:
         state.update(terminal=False, lifecycle='interrupted' if isinstance(exc, KeyboardInterrupt) else 'error')

@@ -126,19 +126,30 @@ class DashboardTests(Fixture):
             if process.poll() is None:
                 process.kill(); process.communicate()
 
-    def test_failed_attempt_persistence_never_publishes_case_as_complete(self):
+    def test_failed_case_record_persistence_is_reported_without_a_false_pass(self):
         from nsim import service
         original=service.write_json
         def fail_record(path,value):
             if path.name == 'run.json' and value.get('lifecycle') == 'attempt_complete': raise OSError('attempt record unavailable')
             return original(path,value)
         with patch('nsim.service.write_json',fail_record), patch('nsim.runner.write_json',fail_record):
-            with self.assertRaises(OSError): run(self.plan(),[self.out])
+            journal, state = run(self.plan(),[self.out])
         data=json.loads(next(self.out.rglob('live.json')).read_text())
-        self.assertEqual(data['lifecycle'],'error')
-        self.assertFalse(data['terminal'])
-        self.assertEqual(data['totals']['completed'],0)
-        self.assertFalse(list(self.out.rglob('final.json')))
+        self.assertEqual(data['lifecycle'],'complete')
+        self.assertTrue(data['terminal'])
+        self.assertFalse(data['passed'])
+        self.assertEqual(data['totals']['failed'],3)
+        self.assertTrue((journal/'final.json').exists())
+        self.assertTrue(all(t['effective_verdict']=='INFRA_ERROR' for t in state['tasks']))
+
+    def test_dashboard_write_failure_does_not_cancel_cases(self):
+        with patch.object(Dashboard, 'publish', side_effect=OSError('display unavailable')) as publish:
+            journal, state = run(self.plan(), [self.out], jobs=1)
+        self.assertTrue(state['passed'])
+        self.assertEqual(publish.call_count, 1)
+        self.assertEqual(len(state['tasks']), 3)
+        self.assertTrue((journal / 'final.json').exists())
+        self.assertEqual(state['display_errors'], ['display unavailable'])
 
     def test_dashboard_data_cannot_break_out_of_script(self):
         data=view(assessed(self.state()),self.out,1,'running','</script><script>alert(1)</script>')

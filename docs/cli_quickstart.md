@@ -118,7 +118,7 @@ nsim pack create -w ./nsim-0.1.0-py3-none-any.whl \
 | `-m / -d / -cd / -sd` | `-mode / -dir / -com-dir / -sim-dir` |
 | `-vr / -rtl / -rf / -vf / -nv` | `--verification-root / --rtl-root / --rtl-filelist / --verification-filelist / --nsim-version` |
 | `-n / -sched / -R / -lic` | `--dry-run / --scheduler / --resource / --license` |
-| `-retry / -rt / -fb / -fi` | `--retries / --retry-seconds / --min-free-bytes / --min-free-inodes` |
+| `-retry / -rt / -fb / -fi` | `--retries / --retry-seconds / --min-free-bytes / --min-free-inodes`；前两项只接受 0，不再自动重试或切根 |
 
 ## 长命令变短的例子
 

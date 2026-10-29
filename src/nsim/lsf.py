@@ -16,6 +16,7 @@ from nsim.storage import digest, write_json
 TERMINAL = {'DONE', 'EXIT', 'PDONE', 'PERR', 'POST_DONE', 'POST_ERR'}
 SUCCESS = {'DONE', 'PDONE', 'POST_DONE'}
 ACTIVE = {'PEND', 'RUN', 'PSUSP', 'USUSP', 'SSUSP', 'WAIT', 'PROV'}
+REJECTED_SUBMISSION = re.compile(r'(?im)^\s*(?:submission refused|job not submitted)\b')
 
 
 class LsfError(RuntimeError):
@@ -185,6 +186,13 @@ def run_process(plan, task, root, policy, argv, cwd, stdout, stderr, timeout, ca
         job['submission'] = {'returncode': response.returncode, 'stdout': response.stdout, 'stderr': response.stderr}
         ids = set(re.findall(r'Job\s*<(\d+)>', response.stdout + '\n' + response.stderr))
         if len(ids) != 1 or int(next(iter(ids))) <= 0:
+            # A missing ID alone does not prove rejection: bsub may have
+            # accepted a job before its reply was lost. Only an explicit
+            # negative response with a failed command is terminal here.
+            if response.returncode != 0 and REJECTED_SUBMISSION.search(response.stderr):
+                job['terminal'] = True
+                job['status'] = 'REJECTED'
+                raise LsfError('submission rejected: ' + response.stderr.strip(), record=record_path)
             raise LsfError('submission did not return one job ID; acceptance is unknown', terminal=False, record=record_path)
         job['job_id'] = ids.pop()
         job['status'] = 'SUBMITTED'
@@ -220,7 +228,8 @@ def run_process(plan, task, root, policy, argv, cwd, stdout, stderr, timeout, ca
                     job['status'] = 'UNKNOWN'
                     save()
             if unknown_since and time.monotonic() - unknown_since >= config['unknown_seconds']:
-                cancel.set()
+                raise LsfError('LSF job status remains unknown; reservation retained',
+                               terminal=False, record=record_path)
             cancel.wait(config['poll_seconds'])
         job['ended_at'] = time.time()
         save()
@@ -255,8 +264,7 @@ def run_process(plan, task, root, policy, argv, cwd, stdout, stderr, timeout, ca
                              str(request_path): request_hash}}
         return result
     except BaseException as exc:
-        cancel.set()
-        if not job['terminal'] and job['job_id'] and not job.get('cancel_attempted'):
+        if cancel.is_set() and not job['terminal'] and job['job_id'] and not job.get('cancel_attempted'):
             try:
                 cancel_and_confirm(config, job, save, transcript)
             except (OSError, ValueError):
@@ -284,15 +292,24 @@ def run_process(plan, task, root, policy, argv, cwd, stdout, stderr, timeout, ca
                 evidence, issue = transcript.finish(job, worker_record, config['result_wait_seconds'])
             except (OSError, ValueError) as log_error:
                 issue = 'LSF log collection failed: ' + str(log_error)
-                with Path(stdout).open('ab') as stream:
-                    stream.write(('\n[nsim LSF] transcript incomplete: ' + issue + '\n').encode())
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                evidence = {str(stdout): digest(Path(stdout))} if job['terminal'] else {}
+                try:
+                    with Path(stdout).open('ab') as stream:
+                        stream.write(('\n[nsim LSF] transcript incomplete: ' + issue + '\n').encode())
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    evidence = {str(stdout): digest(Path(stdout))} if job['terminal'] else {}
+                except OSError as fallback_error:
+                    issue += '; fallback log failed: ' + str(fallback_error)
+                    evidence = {}
             job['log_collection'] = {'path': str(stdout), 'complete': issue is None, 'issue': issue,
                                      'sha256': evidence.get(str(stdout))}
-            write_json(record_path, job)
-            evidence[str(record_path)] = digest(record_path)
+            try:
+                write_json(record_path, job)
+                evidence[str(record_path)] = digest(record_path)
+            except OSError as record_error:
+                if failure is None:
+                    raise LsfError('LSF job record write failed: ' + str(record_error),
+                                   terminal=job['terminal'], record=record_path) from record_error
             evidence[str(request_path)] = request_hash
             if result is not None:
                 result['evidence'].update(evidence)

@@ -15,7 +15,7 @@ from nsim.layout import make_directory
 from nsim.lsf import LsfError, run_process
 from nsim.planning import check_identity
 from nsim.runtime import module_command
-from nsim.storage import digest, error_record, preflight, write_json
+from nsim.storage import digest, preflight, write_json
 
 
 def command(plan, task, result, wave_dir, build=None):
@@ -40,12 +40,14 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
     attempt.update(retry_index=len(previous), parent=previous[-1]['id'] if previous else task['parent'])
     submit = plan["submits"][task["submit"]]
     work = None
+    operation = 'output_preflight'
     try:
         if cancel.is_set():
             attempt.update(verdict='CANCELLED', reason='controller cancelled')
             return attempt
         attempt["storage"] = preflight(root, policy["min_free_bytes"], policy["min_free_inodes"])
         check_identity(plan)
+        operation = 'compilation'
         build, manifest = builds.ensure(root, task, cancel, policy)
         build_evidence = {str(build / 'build.json'): digest(build / 'build.json'),
                           **manifest.get('scheduler_evidence', {}),
@@ -61,6 +63,7 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
             if (build / 'compile.log').is_file():
                 attempt['evidence'][str(build / 'compile.log')] = digest(build / 'compile.log')
             return attempt
+        operation = 'simulation_setup'
         work = directories.prepare(root, task)
         log_dir = work
         wave_dir = make_directory(work / 'waves', work)
@@ -70,12 +73,14 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
         run_record = work / 'run.json'
         attempt['record_path'] = str(run_record)
         if not run_record.exists():
+            operation = 'case_record_write'
             write_json(run_record, make_record(plan, dict(task, attempts=[*previous, attempt]), run_record))
         if not manifest['ready']:
             attempt.update(verdict='COMPILE_FAIL', reason=manifest.get('reason', 'compilation did not complete'))
             return attempt
         # Never inherit credentials or unspecified environment into the child.
         timed_out = False
+        operation = 'simulation'
         if submit['scheduler']['kind'] == 'lsf':
             stage = run_process(plan, task, root, policy, argv, work, log_dir / 'run.log',
                                  log_dir / 'run.log', submit['timeout_seconds'], cancel,
@@ -94,12 +99,14 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
         if stage.get('error'):
             raise OSError(stage.get('error_errno'), stage['error'])
         attempt["ended_at"] = time.time()
+        operation = 'output_postflight'
         attempt["storage_after"] = preflight(root, policy["min_free_bytes"], policy["min_free_inodes"])
         if cancel.is_set():
             attempt.update(verdict="CANCELLED", reason="controller cancelled")
         elif stage.get('hook_failed'):
             attempt.update(verdict='HOOK_FAIL', reason=stage['hook_reason'])
         else:
+            operation = 'result_evaluation'
             attempt.update(evaluate(result, task, submit["required_checks"], attempt['exit_code'],
                                     timed_out, submit["settle_seconds"], cancel))
         analysis = attempt.get('log_analysis')
@@ -128,10 +135,23 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
         attempt.update(verdict='CANCELLED' if exc.cancelled else 'SCHEDULER_ERROR' if exc.terminal else 'LSF_UNKNOWN',
                        reason=str(exc), terminal=exc.terminal, scheduler_record=exc.record)
         attempt['evidence'].update(exc.evidence)
-        if exc.record and Path(exc.record).is_file():
-            attempt['evidence'][exc.record] = digest(Path(exc.record))
+        try:
+            if exc.record and Path(exc.record).is_file():
+                attempt['evidence'][exc.record] = digest(Path(exc.record))
+        except OSError as record_error:
+            attempt['scheduler_record_error'] = str(record_error)
     except OSError as exc:
-        attempt.update(verdict="INFRA_ERROR", reason=str(exc), storage_error=error_record(exc, root))
+        failure = {'operation': operation, 'errno': exc.errno, 'path': exc.filename,
+                   'output_root': str(root), 'message': str(exc)}
+        if work is not None:
+            failure['run_log_path'] = str(work / 'run.log')
+            failure['result_path'] = str(work / 'result.json')
+            for label in ('run.log', 'result.json'):
+                try:
+                    failure[label + '_exists'] = (work / label).is_file()
+                except OSError:
+                    failure[label + '_exists'] = None
+        attempt.update(verdict='INFRA_ERROR', reason=str(exc), failure=failure)
     except ValueError as exc:
         attempt.update(verdict="INPUT_CHANGED", reason=str(exc))
     finally:
@@ -145,8 +165,10 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
                 attempt['evidence'][str(path)] = write_json(path, value)
             except OSError as exc:
                 attempt.pop('record_path', None)
+                attempt['case_record_error'] = str(exc)
+                attempt['case_record_failure'] = {'errno': exc.errno, 'path': exc.filename or str(path),
+                                                  'message': str(exc)}
                 if attempt.get('terminal') is not False:
-                    attempt.update(verdict='INFRA_ERROR', reason=str(exc), storage_error=error_record(exc, root))
-                else:
-                    attempt['analysis_write_error'] = str(exc)
+                    attempt['verdict'] = 'INFRA_ERROR'
+                attempt['reason'] = (attempt.get('reason', '') + ' | case record write failed: ' + str(exc)).strip(' |')
     return attempt

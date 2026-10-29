@@ -6,6 +6,7 @@ import fcntl
 import os
 from pathlib import Path
 import queue
+import sys
 import threading
 import time
 import uuid
@@ -24,25 +25,16 @@ from nsim.runner import execute
 from nsim.storage import atomic_write, digest, error_record, preflight, write_json
 
 
-class StoragePool:
-    def __init__(self, roots):
-        self.roots = roots
-        self.quarantined = {}
-        self.lock = threading.Lock()
-
-    def choose(self):
-        with self.lock:
-            return next((p for p in self.roots if str(p) not in self.quarantined), None)
-
-    def isolate(self, root, error):
-        with self.lock:
-            self.quarantined[str(root)] = error
+class JournalWriteError(OSError):
+    """The controller cannot durably account for the regression's progress."""
 
 
 def validate_roots(plan, roots):
     roots = list(dict.fromkeys(Path(p).resolve() for p in roots))
     if not roots:
         raise ConfigError("at least one output root is required")
+    if len(roots) != 1:
+        raise ConfigError("select exactly one output root for this run; use -o to choose from project defaults")
     sources = [Path(plan['project']['root']), *[Path(s['root']) for s in plan['project'].get('sources', {}).values()]]
     tool = Path(__file__).resolve().parent
     def nested(a, b):
@@ -56,7 +48,7 @@ def validate_roots(plan, roots):
     return roots
 
 
-def run(plan, roots, jobs=1, retries=1, retry_seconds=120,
+def run(plan, roots, jobs=1, retries=0, retry_seconds=0,
         min_free_bytes=0, min_free_inodes=0, dry_run=False, on_progress=None):
     with SimulationDirectories(plan, min_free_bytes, min_free_inodes) as directories, Builds(plan) as builds:
         return _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
@@ -68,6 +60,8 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
     integer(jobs, "jobs", 1)
     integer(retries, "retries")
     number(retry_seconds, "retry_seconds")
+    if retries or retry_seconds:
+        raise ConfigError("automatic infrastructure retries and output-root failover are disabled; use rerun/recover explicitly")
     integer(min_free_bytes, "min_free_bytes")
     integer(min_free_inodes, "min_free_inodes")
     roots = validate_roots(plan, roots)
@@ -83,17 +77,8 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
                 raise ConfigError('cannot execute plan with unresolved tools: ' + ', '.join(submit['unresolved_tools']))
             if submit['adapter'] == 'vcs':
                 raise ConfigError('native VCS execution is not yet enabled; use --dry-run')
-    pool = StoragePool(roots)
-    record_root = None
-    for root in roots:
-        try:
-            preflight(root, min_free_bytes, min_free_inodes)
-            record_root = root
-            break
-        except OSError as exc:
-            pool.isolate(root, error_record(exc, root))
-    if record_root is None:
-        raise OSError('no healthy output root; cannot persist run records: ' + str(pool.quarantined))
+    record_root = roots[0]
+    preflight(record_root, min_free_bytes, min_free_inodes)
     plan = copy.deepcopy(plan)
     journal = None
     if dry_run or is_regression(plan):
@@ -104,17 +89,6 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
         execution_root.mkdir(exist_ok=False)
         journal = execution_root / 'report'
         journal.mkdir()
-        if isolated_regression(plan) and not dry_run:
-            for root in roots:
-                if root == record_root or str(root) in pool.quarantined:
-                    continue
-                try:
-                    preflight(root, min_free_bytes, min_free_inodes)
-                except OSError as exc:
-                    pool.isolate(root, error_record(exc, root))
-                    continue
-                make_directory(root / 'regr_dir', root)
-                (root / 'regr_dir' / plan['id']).mkdir(exist_ok=False)
     cancel = threading.Event()
     compile_policy = dict(min_free_bytes=min_free_bytes, min_free_inodes=min_free_inodes)
     if not dry_run:
@@ -151,7 +125,7 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
         preview = {'schema_version': 1, 'executed': False,
                    'tasks': [commands(plan, task, record_root) for task in plan['tasks']]}
         write_json(journal / 'commands.json', preview)
-        write_json(journal / 'preflight.json', {'selected_root': str(record_root), 'failures': pool.quarantined})
+        write_json(journal / 'preflight.json', {'selected_root': str(record_root), 'failures': {}})
         return journal, {"id": plan["id"], "dry_run": True, "tasks": plan["tasks"], "passed": False}
     state = {"schema_version": 1, "id": plan["id"], 'phase': phase, "terminal": False, "started_at": time.time(),
              "ended_at": None, "report_errors": [], 'scheduler_jobs': {}, "quarantined": {}, "tasks": [
@@ -167,6 +141,10 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
 
     if single:
         save_single('running')
+    else:
+        # A case record may be unwritable while the regression journal remains
+        # writable. Keep an independent, durable account of every case result.
+        write_json(journal / 'state.json', assessed(state, verify=False))
     notifications = queue.SimpleQueue()
     ready = threading.Event()
     dashboard = Dashboard(journal) if is_regression(plan) else None
@@ -194,49 +172,56 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
         return changed
 
     def task_work(task):
-        attempts = []
-        deadline = time.monotonic() + retry_seconds
-        for retry in range(retries + 1):
-            if cancel.is_set():
-                break
-            root = pool.choose()
-            if root is None:
-                break
-            attempt = execute(plan, task, root, policy, cancel, directories, builds, attempts)
-            attempt["retry_index"] = retry
-            attempt["parent"] = attempts[-1]["id"] if attempts else task["parent"]
-            attempts.append(attempt)
-            # Records now share output storage. If this write fails, stop dispatching;
-            # never claim that a failed attempt was durably recorded elsewhere.
+        attempt = execute(plan, task, record_root, policy, cancel, directories, builds)
+        attempt['retry_index'] = 0
+        attempt['parent'] = task['parent']
+        # A missing per-case record is this case's error. The dispatcher saves
+        # the failure to the independent regression state before refilling.
+        if not attempt.get('record_path') and not attempt.get('case_record_error'):
+            target = None
             try:
                 if phase == 'com':
-                    write_json(journal / "records" / (attempt["id"] + ".json"), attempt)
-                elif not attempt.get('record_path'):
-                    # Failures before simulation (or a failed product write) still
-                    # need a durable case record before emitting completion.
-                    path = directories.prepare(record_root, task) / 'run.json'
-                    attempt['record_path'] = str(path)
-                    value = make_record(plan, dict(task, status='completed', attempts=attempts),
-                                        path, lifecycle='attempt_complete')
-                    attempt['evidence'][str(path)] = write_json(path, value)
+                    target = journal / 'records' / (attempt['id'] + '.json')
+                    write_json(target, attempt)
+                else:
+                    target = directories.prepare(record_root, task) / 'run.json'
+                    value = make_record(plan, dict(task, status='completed', attempts=[attempt]),
+                                        target, lifecycle='attempt_complete')
+                    attempt['evidence'][str(target)] = write_json(target, value)
+                    attempt['record_path'] = str(target)
             except OSError as exc:
-                raise OSError(exc.errno, f"attempt evidence NOT persisted: task={task['id']} "
-                              f"attempt={attempt['id']} host={attempt.get('host')} "
-                              f"output={root} journal={journal}: {exc}") from exc
-            if attempt["verdict"] != "INFRA_ERROR":
-                break
-            pool.isolate(root, attempt.get("storage_error", {"reason": attempt.get("reason")}))
-            if time.monotonic() >= deadline:
-                break
-        if not attempts:
-            attempts.append({"id": uuid.uuid4().hex, "verdict": "INFRA_ERROR" if not cancel.is_set() else "CANCELLED",
-                             "reason": "no healthy storage available" if not cancel.is_set() else "controller cancelled",
-                             "evidence": {}, "checks": {}, "parent": task["parent"], "exit_code": None})
-        return attempts
+                attempt['case_record_error'] = str(exc)
+                attempt['case_record_failure'] = {'errno': exc.errno,
+                                                  'path': exc.filename or (str(target) if target else None),
+                                                  'message': str(exc)}
+                attempt['record_path'] = None
+                if attempt.get('terminal') is not False:
+                    attempt['verdict'] = 'INFRA_ERROR'
+                attempt['reason'] = (attempt.get('reason', '') + ' | case record write failed: ' + str(exc)).strip(' |')
+        return [attempt]
 
+    def checkpoint():
+        if single:
+            return
+        try:
+            write_json(journal / 'state.json', assessed(state, verify=False))
+        except OSError as exc:
+            raise JournalWriteError(exc.errno, f'regression state NOT persisted at {journal / "state.json"}: {exc}') from exc
+
+    display_failed = False
     def progress(lifecycle='running', message=''):
-        if dashboard:
-            if dashboard.publish(state, lifecycle, message) and on_progress:
+        nonlocal display_failed
+        if dashboard and not display_failed:
+            try:
+                published = dashboard.publish(state, lifecycle, message)
+            except OSError as exc:
+                # live.json and dashboard.html are derived display files. The
+                # full state.json checkpoint, not the display, controls dispatch.
+                state.setdefault('display_errors', []).append(str(exc))
+                print(f'nsim: dashboard publication failed: {exc}', file=sys.stderr)
+                display_failed = True
+                published = False
+            if published and on_progress:
                 on_progress(journal, dashboard.snapshot)
 
     executor = ThreadPoolExecutor(max_workers=jobs)
@@ -246,16 +231,23 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
         lock.flush()
         pending = iter(state["tasks"])
         active = {}
+        retained = set()
         try:
             progress()
             while True:
                 launched = False
-                while len(active) < jobs and not cancel.is_set():
+                while len(active) + len(retained) < jobs and not cancel.is_set():
                     task = next(pending, None)
                     if task is None:
                         break
                     task["status"] = "running"
                     task["submitted_at"] = time.time()
+                    try:
+                        checkpoint()
+                    except JournalWriteError:
+                        task['status'] = 'planned'
+                        task.pop('submitted_at', None)
+                        raise
                     if dashboard:
                         dashboard.update(state, tasks=[task])
                     future = executor.submit(task_work, task)
@@ -278,30 +270,29 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
                     task = active.pop(future)
                     task["attempts"] = future.result()
                     task["status"] = "completed"
+                    if any(attempt.get('terminal') is False for attempt in task['attempts']):
+                        retained.add(task['id'])
                     if dashboard:
                         dashboard.update(state, tasks=[task])
                 if done:
+                    checkpoint()
                     progress()
             collect_events()
-            for task in state['tasks']:
-                if task['status'] == 'planned':
-                    task['status'] = 'cancelled'
-                    task['attempts'] = [{'id': uuid.uuid4().hex, 'verdict': 'CANCELLED', 'terminal': True,
-                                         'reason': 'not submitted after controller stopped dispatching',
-                                         'evidence': {}, 'checks': {}, 'exit_code': None, 'parent': task['parent']}]
             unresolved = [attempt for task in state['tasks'] for attempt in task['attempts']
                           if attempt.get('terminal') is False]
             if unresolved:
+                for task in state['tasks']:
+                    if task['status'] == 'planned':
+                        task['pending_reason'] = 'not executed: LSF capacity retained by unresolved job'
                 state.update(message='unresolved LSF jobs; no terminal completion published',
                              ended_at=time.time(), scheduler_errors=[a['reason'] for a in unresolved])
                 state = assessed(state)
                 if single:
                     save_single('unresolved')
                 else:
-                    write_json(journal / 'state.json', state)
+                    checkpoint()
                 progress('unresolved', state['message'])
                 return journal, state
-            state["quarantined"] = pool.quarantined
             state["terminal"] = True
             state["ended_at"] = time.time()
             state = assessed(state)
@@ -320,22 +311,22 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
                     # a later report publication failure.
                     for filename in ('failed.json', 'report.md', 'report.html'):
                         (journal / filename).unlink(missing_ok=True)
-            state["quarantined"] = pool.quarantined
             state = assessed(state, verify=False)
             if single:
                 save_single('completed')
                 return journal, state
-            write_json(journal / "state.json", state)
+            checkpoint()
             progress('finalizing')
             write_json(journal / "final.json", {"schema_version": 2, "terminal": True,
                                                 "files": {n: digest(journal / n) for n in files}})
             progress('complete', '最终报告发布失败，请检查报告错误。' if state['report_errors'] else '')
             return journal, state
         except BaseException as exc:
-            # Stop dispatching and wait for cancellation before publishing a stopped UI.
-            # No completed/terminal run is invented for an interrupted controller.
-            cancel.set()
-            executor.shutdown(wait=True, cancel_futures=True)
+            # A failed central checkpoint stops new dispatch, but already
+            # submitted jobs must not be cancelled as a side effect.
+            if not isinstance(exc, JournalWriteError):
+                cancel.set()
+            executor.shutdown(wait=True, cancel_futures=not isinstance(exc, JournalWriteError))
             collect_events()
             for future, task in active.items():
                 if future.done() and not future.cancelled():
@@ -416,6 +407,9 @@ def replay(source, roots=None, recovery=False, seed=None, **overrides):
     plan['seed_selection'] = {'source': 'replay_override' if seed is not None else 'replay', 'repeat': None,
                               'values': list(dict.fromkeys(task['seed'] for task in plan['tasks']))}
     policy = original["policy"]
-    settings = {key: policy[key] for key in ("jobs", "retries", "retry_seconds", "min_free_bytes", "min_free_inodes")}
+    settings = {key: policy[key] for key in ("jobs", "min_free_bytes", "min_free_inodes")}
+    # Historical policies may describe automatic failover. Replaying one is an
+    # explicit new run and must use the current no-failover contract.
+    settings.update(retries=0, retry_seconds=0)
     settings.update({k: v for k, v in overrides.items() if v is not None})
     return run(plan, roots or policy["output_roots"], **settings)

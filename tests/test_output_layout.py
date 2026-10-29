@@ -242,13 +242,14 @@ class OutputLayoutTests(Fixture):
             run(plan, [self.out])
         self.assertFalse((self.project / 'sim_dir').exists())
 
-    def test_missing_primary_selects_healthy_output_for_records(self):
+    def test_missing_selected_root_does_not_switch_to_another_root(self):
         missing = self.base / 'offline'
-        record, state = run(self.plan(), [missing, self.backup])
-        self.assertEqual(record.parent.parent, self.backup / 'regr_dir')
-        self.assertTrue(state['passed'])
-        self.assertIn(str(missing), state['quarantined'])
+        with self.assertRaisesRegex(ConfigError, 'select exactly one output root'):
+            run(self.plan(), [missing, self.backup])
+        with self.assertRaisesRegex(OSError, 'storage root missing'):
+            run(self.plan(), [missing])
         self.assertFalse(missing.exists())
+        self.assertEqual(list(self.backup.iterdir()), [])
 
     def test_legacy_completion_format_remains_readable(self):
         record, _ = self.launch()

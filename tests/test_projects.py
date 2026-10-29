@@ -145,18 +145,21 @@ class ProjectTests(unittest.TestCase):
         # even though the launcher is called from outside the verification directory.
         with patch.dict(os.environ, NSIM_OUTPUT_ROOT=str(self.base / 'stale-output'),
                         NSIM_EVENT_ROOT=str(self.base / 'stale-events')):
-            result = launch(*args)
+            ambiguous = subprocess.run([launcher, *map(str, args)], cwd=self.base,
+                                       capture_output=True, text=True, timeout=20)
+            self.assertEqual(ambiguous.returncode, 2)
+            self.assertIn('select exactly one output root', ambiguous.stderr)
+            result = launch(*args, '--output-root', 'output')
             self.assertTrue(result['passed'])
             journal = Path(result['journal'])
             self.assertEqual(journal.parent.parent, self.base / 'output' / 'regr_dir')
             plan = json.loads((journal / 'plan.json').read_text())
-            self.assertEqual(plan['policy']['output_roots'], [str(self.base / p) for p in ('output', 'backup')])
+            self.assertEqual(plan['policy']['output_roots'], [str(self.base / 'output')])
             self.assertTrue(launch('report', 'show', journal, '--json')['passed'])
-            result = launch(*args, '--output-root', 'override-output', '--output-root', 'override-backup')
+            result = launch(*args, '--output-root', 'override-output')
             journal = Path(result['journal'])
             plan = json.loads((journal / 'plan.json').read_text())
-            self.assertEqual(plan['policy']['output_roots'],
-                             [str(self.base / p) for p in ('override-output', 'override-backup')])
+            self.assertEqual(plan['policy']['output_roots'], [str(self.base / 'override-output')])
             self.assertEqual(journal.parent.parent, self.base / 'override-output' / 'regr_dir')
             run_dir = next((self.base / 'output' / 'regr_dir').glob('*/fake/rtl/sim_dir/*'))
             self.assertTrue(launch('report', 'show', run_dir, '--json')['passed'])

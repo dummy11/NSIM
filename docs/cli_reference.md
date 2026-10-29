@@ -132,7 +132,7 @@
 | `--rtl-filelist PATH` | RTL filelist；新建工程必填 |
 | `--verification-filelist PATH` | 验证 filelist；省略时使用并按需创建验证根下的 `filelist/tb.f` |
 | `--nsim-version VERSION` | 选择已安装的版本；省略或 `latest` 时选择兼容的已安装稳定版本 |
-| `--output-root PATH` | 保存默认输出根；重复指定备用根 |
+| `--output-root PATH` | 保存项目可选的输出根；若保存多个，执行时需用 `-o` 明确选一个 |
 | `--json` | 输出 JSON |
 
 已有工程再次 bootstrap 用于注册或确认现有配置。修改配置使用 update。
@@ -204,10 +204,10 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 | `-dir NAME` | 所选模式 | 工作区名称 |
 | `-com-dir PATH` | `com_dir` | 编译目录，相对工作区或绝对路径 |
 | `-sim-dir PATH` | `sim_dir` | 仿真目录，相对工作区或绝对路径；com 不执行仿真 |
-| `-o / --output-root PATH` | 按下述优先级 | 本次输出根；可重复指定备用根 |
+| `-o / --output-root PATH` | 按下述优先级 | 本次选定的唯一输出根；不自动切根 |
 | `-j / -jobs / --jobs N` | `1` | 本次调用允许的最大未完成任务数，正整数 |
-| `--retries N` | `1` | 存储基础设施故障允许的额外重试次数，非负整数 |
-| `--retry-seconds SECONDS` | `120` | 任务启动后允许发起存储故障重试的时间预算，非负数 |
+| `--retries N` | `0` | 兼容旧调用；自动基础设施重试已停用，只接受 0 |
+| `--retry-seconds SECONDS` | `0` | 兼容旧调用；自动基础设施重试已停用，只接受 0 |
 | `--min-free-bytes N` | `0` | 输出根最少剩余字节数，非负整数 |
 | `--min-free-inodes N` | `0` | 输出根最少剩余 inode 数，非负整数 |
 | `--dry-run` | 关闭 | 保存执行计划及命令预览，不执行真实编译/仿真 |
@@ -218,13 +218,13 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 
 执行阶段的 `-mode`、`-dir`、`-com-dir`、`-sim-dir`、`-repeat` 同时支持对应的双横线形式和上表的短选项。
 
-输出根优先级：子命令后的 `-o` → 子命令前的 `-o` → 项目默认输出根 → `NSIM_OUTPUT_ROOT`。都未配置时报错。输出根必须预先存在。
+输出根优先级：子命令后的 `-o` → 子命令前的 `-o` → 项目默认输出根 → `NSIM_OUTPUT_ROOT`。都未配置时报错；默认配置含多个根时必须显式选一个。选定的根必须预先存在，检查失败不会自动改用其他根。
 
 回归使用批次隔离目录，编译与仿真路径必须留在该批次对应 submit 的目录内；自定义相对路径或绝对路径仍受布局校验。
 
 重复 `--resource` 或 `--license` 构成新的覆盖列表或映射，不追加到 submit 的原配置。资源表达式含括号等字符时加引号，例如 `--resource 'rusage[mem=4096]'`。
 
-`--retry-seconds` 不控制每两次重试的等待间隔，也不是仿真超时。仿真超时在 submit 的 `timeout_seconds` 中配置；功能检查失败不自动进行存储重试。
+`--retries` 与 `--retry-seconds` 非零时报配置错误。仿真超时在 submit 的 `timeout_seconds` 中配置；再次执行或更换输出根需要显式使用 rerun/recover。
 
 ## 报告、重跑、恢复与存储
 
@@ -232,7 +232,7 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 
 | 命令 | 全部选项 | 默认行为 |
 | --- | --- | --- |
-| `rerun SOURCE` | `-o / --output-root PATH`、`-seed / --seed N`、`--jobs N`、`--retries N`、`--retry-seconds SECONDS` | 未指定的值沿用历史计划 |
+| `rerun SOURCE` | `-o / --output-root PATH`、`-seed / --seed N`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | 沿用历史输入和版本；历史多根计划需明确选择本次输出根 |
 | `recover SOURCE` | 与 rerun 相同 | 仅选择存储/证据失败；报告发布失败时重建相关任务报告 |
 | `report show SOURCE` | `--json` | 默认输出 Markdown 文本报告 |
 | `storage check ROOT` | `--min-free-bytes N`、`--min-free-inodes N` | 两个阈值均默认 0；输出 JSON |

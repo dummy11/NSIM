@@ -10,7 +10,7 @@
 | `-dir` | 当前 mode 的名称 | 工作区名称，只接受一个安全目录名；不改变执行模式 |
 | `-com-dir` | `com_dir` | 编译目录路径；相对路径以当前工作区为基准，也接受绝对路径 |
 | `-sim-dir` | `sim_dir` | 仿真父目录；相对工作区解析，也接受绝对路径，下面仍按 case_seed 分目录 |
-| `-o` / `--output-root` | 项目登记的输出根 | 本次输出根；可重复指定备用位置，不修改项目设置 |
+| `-o` / `--output-root` | 项目登记的唯一输出根 | 本次选定一个输出根，不修改项目设置；项目登记多个根时必须显式选择 |
 | `-l` / `--caselist` | 必须选择 case 或 caselist | 一个或多个 caselist 文件；单次 regr 使用此选项，批量入口使用 -rl |
 | `-sub` / `--submit` | 必填 | 一个或多个 submit 名称或文件路径 |
 | `-seed` / `--seed` | 随机生成一个 seed | 一个或多个正整数 seed，重复值去重 |
@@ -113,7 +113,7 @@ bootstrap 生成 8 份清单示例，完整规则见 [Caselist 语法](caselist.
 
 `-repeat N` 表示生成 N 个不同随机 seed，并将这一组 seed 应用于所有 case/submit，不表示重复覆盖同一个 seed。它必须是正整数，不能和 -seed 同时使用；随机数在规划时生成一次，保存在 seed_selection.values 和各任务中。例如 3 个 case × 2 个 submit × repeat 5 = 30 个仿真任务。任务可按 --jobs 并发，不会因 repeat 写入同一个 case_seed 目录。rerun/recover 复用失败任务记录的 seed，绝不重新抽样；显式 rerun -seed 可以覆盖为单个新值。
 
-`-o` 支持放在子命令前或后，例如 `nsim -o /scratch/out regr ...` 和 `nsim regr -o /scratch/out ...`。两处同时指定时，子命令后的值整体覆盖前面的值；每处都可重复配置备用根。它只影响本次运行，持久修改项目默认位置使用 `nsim update --output-root`。固定的绝对 -com-dir/-sim-dir 不会随 -o 改变。
+`-o` 支持放在子命令前或后，例如 `nsim -o /scratch/out regr ...` 和 `nsim regr -o /scratch/out ...`。两处同时指定时，子命令后的值覆盖前面的值；本次执行只选择一个输出根，不会自动切换备用根。它只影响本次运行，持久修改项目默认位置使用 `nsim update --output-root`。固定的绝对 -com-dir/-sim-dir 不会随 -o 改变。
 
 ## command 编译契约
 

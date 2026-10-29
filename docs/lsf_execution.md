@@ -65,7 +65,7 @@ nsim regr -l smoke.list -sub submit_0 -seed 42 -scheduler local -jobs 4
 | `poll_seconds` | 查询作业状态的间隔 |
 | `command_timeout_seconds` | 每次 LSF 客户端命令的等待上限 |
 | `deadline_seconds` | 每个已提交作业的总等待预算，含排队和执行；到期发起取消 |
-| `unknown_seconds` | 连续无法确定作业状态的预算；到期停止补交并尝试取消 |
+| `unknown_seconds` | 连续无法确定作业状态的预算；到期保留该 job 的名额和保护记录 |
 | `cancel_seconds` | 发出 bkill 并查询确认终态的总预算 |
 | `result_wait_seconds` | 已确认终态后等待共享存储上的 worker 结果可见的预算 |
 
@@ -79,9 +79,9 @@ nsim regr -l smoke.list -sub submit_0 -seed 42 -scheduler local -jobs 4
 
 实际提交包含唯一作业名、`-cwd`、独立 stdout/stderr 路径及队列/资源设置。提交成功后记录返回的正整数 job ID，使用 `bjobs -a -json -o "jobid stat exit_code exec_host" JOB_ID` 查询对应记录。LSF 客户端需要支持该 JSON 输出格式。
 
-DONE/EXIT 等明确终态才释放名额；PEND/RUN/暂停占用名额；UNKWN/ZOMBI、缺失记录、不可解析输出或查询失败都不能证明进程已停止。状态语义依据 [IBM bjobs 文档](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=bjobs-description)。短暂查询失败会继续查询；超过预算则停止补交并尝试取消，状态未知的任务不会自动重投或切换存储重试。
+DONE/EXIT 等明确终态才释放名额；PEND/RUN/暂停占用名额；UNKWN/ZOMBI、缺失记录、不可解析输出或查询失败都不能证明进程已停止。状态语义依据 [IBM bjobs 文档](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=bjobs-description)。短暂查询失败会继续查询；超过预算仍未知时，该 job 保留保护文件和一个 `--jobs` 名额，不自动重投或取消。其他已运行 job 继续；只有其余名额确实空闲时才提交新 job。`--jobs=1` 且唯一名额未知时，后续 case 显示未执行，不被伪记为取消；整轮不发布 `final.json`。
 
-Ctrl-C、调度等待超时和控制器错误会对已知 job ID 执行 `bkill`，随后继续查询，只有确认终态才解除目录占用。取消命令返回成功本身不算终态证据；不使用 `bkill -r`，因为强制从调度器移除不能证明操作系统进程已经终止。参见 [IBM 强制移除说明](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=jobs-forcefully-removing-job-from-lsf)。
+`bsub` 无可靠 job ID 时，受理状态未知；仅在失败回执明确表示拒绝时记为已拒绝。未知受理保留名额与保护文件，不重复提交。单个 job 的提交、查询、执行或日志收集错误不会设置整批取消信号。Ctrl-C 和该 job 的调度等待超时可对已知 job ID 执行 `bkill`，随后继续查询，只有确认终态才解除目录占用。取消命令返回成功本身不算终态证据；不使用 `bkill -r`，因为强制从调度器移除不能证明操作系统进程已经终止。参见 [IBM 强制移除说明](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=jobs-forcefully-removing-job-from-lsf)。
 
 记录位于实际编译或仿真目录内，无需 event-root：
 

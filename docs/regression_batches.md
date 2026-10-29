@@ -86,13 +86,14 @@ output/
 也可从 case 仿真目录通过 run.json 找到对应记录。回归失败重跑创建新的回归与 report，保留原始
 seed、配置和来源，不改写原回归及批次结论。批次重跑需先从批次报告选择具体回归。
 现有 recover 仍针对已发布终态的存储/证据失败，不支持自动接续被中断的批次或状态未知的 LSF 作业。
-多输出根故障切换时，同一回归 ID 可在不同根下保存产物；report 记录其实际位置，归档时需包含这些引用产物。
+同一次回归使用一个明确选定的输出根；case 执行错误只记录该 case 的实际问题，不触发自动切根。历史上使用多个输出根的记录仍可读取；显式 rerun/recover 可为新回归选择其他根。
 
 ## 控制器、Dashboard 与统计
 
 控制器以 plan 登记的任务为统计范围，按完成回调与 LSF 状态变化更新；不扫描历史目录。
 每次回归有独立的终端 Dashboard、dashboard.html、live.json、report.html。批次清单记录各行对应的回归 ID，
-批次总览只汇总这些 ID；同名任务跨回归分别计数，自动存储重试次数不增加计划任务数。
+批次总览只汇总这些 ID；同名任务跨回归分别计数。case 出错时后续任务各自执行，不自动进行存储重试。
+批次或子回归的实时展示文件写入失败会在 stderr 报告，不取消已提交的任务；`state.json` 与最终完成记录仍决定是否有可信的整批结果。
 
 批次运行在 stderr 显示当前行及总进度，子回归保留原有终端面板。完整批次 state.json
 在回归行边界及结束/异常时保存；子任务事件只更新有界 live.json 和展示当前行的 dashboard.html。
@@ -123,4 +124,4 @@ nsim rerun /data/output/regr_dir/RUN_ID
 Dry-run 在 report/ 保存计划、commands.json 和 preflight.json，不创建编译/仿真产物，不清理历史目录。
 批次预览同样生成各行预览与总览。真实 VCS 与 farm 的既有能力边界不因该接口改变。
 
-各 case 的 run.json 合并身份、attempt 和 analysis，不重复保存公共计划。回归 plan.json 只在开始写入，state.json 在结束或异常时保存。批次 live.json 的中间快照可带 partial=true，此时 regressions 仅包含当前行，regression_count 和 totals 表示完整批次；完整行列表见批次 state.json 及最终报告。
+各 case 的 run.json 合并身份、attempt 和 analysis，不重复保存公共计划。子回归 plan.json 只在开始写入，state.json 在派发、case 完成和最终发布时保存；批次自身的 state.json 在回归行边界及结束/异常时保存。批次 live.json 的中间快照可带 partial=true，此时 regressions 仅包含当前行，regression_count 和 totals 表示完整批次；完整行列表见批次 state.json 及最终报告。

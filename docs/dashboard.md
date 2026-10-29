@@ -22,9 +22,9 @@ smoke  rtl  seed=42  FAIL  E/F=1/0  tb/checker.sv:27  data mismatch
 ## 更新流程
 
 1. 仿真进程结束，执行 submit 声明的 `post_sim` hooks，最后完成内置或用户替代的日志分析。
-2. case 的 `run.json`（包含分析摘要及 attempt）保存成功。
-3. 完成回调唤醒 nsim 主进程；控制器增量更新该 case 和计数。
-4. 控制器原子保存 `live.json` 摘要，然后直接重绘终端，无需等待整批完成或下一秒的刷新周期。
+2. 尝试保存该 case 的 `run.json`；若写入失败，该 case 记为错误，不能通过。
+3. 完成回调唤醒 nsim 主进程；控制器先把该 case 结果持久保存到回归 `state.json`，再增量更新计数和补交任务。若整批状态无法保存，停止新派发。
+4. 控制器原子保存 `live.json` 摘要，然后直接重绘终端，无需等待整批完成或下一秒的刷新周期。展示文件写失败不取消已提交的 job。
 
 同一次唤醒中已经完成的多个任务可以一起显示。无状态变化时 Dashboard 不重绘、不扫描日志、不轮询文件、不写心跳。移除的是 Dashboard 的定时刷新；LSF 后端仍按调度配置查询 `bjobs`，查询到状态变化后通知控制器。
 
@@ -64,7 +64,7 @@ nsim regr -l smoke.list -sub rtl -seed 42 -jobs 8 \
 output/regr_dir/<regression-id>/report/
 ├── live.json       # schema 3：事件触发保存的小型摘要
 ├── dashboard.html  # 有界进度快照，展示最近用例/作业，可进入最终报告
-├── state.json      # 最终完整状态
+├── state.json      # 运行中逐 case 更新，结束时保存完整状态
 ├── report.md       # 最终完整文本报告
 ├── report.html     # 自包含的最终 HTML，支持分页
 └── final.json      # 最终完成记录与校验
@@ -72,7 +72,7 @@ output/regr_dir/<regression-id>/report/
 
 新运行不再生成 `live.html`、`live-meta.js`、`live-data.js` 或 `live-cases/live-jobs` 分页文件。旧回归记录保持原样。
 
-`live.json` schema 3 包含 `run_id`、`revision`、`lifecycle`、`published_at`、`terminal`、`passed`、`totals`、`log_summary`、`recent_cases`、`recent_jobs`、`job_counts`、`job_count` 和 `message`。它不复制全量任务或证据，不再带分页索引，也没有定时心跳。运行中完整 attempt 在各 case 的 `run.json.task.attempts`，最终记录在 `state.json`。
+`live.json` schema 3 包含 `run_id`、`revision`、`lifecycle`、`published_at`、`terminal`、`passed`、`totals`、`log_summary`、`recent_cases`、`recent_jobs`、`job_counts`、`job_count` 和 `message`。它不复制全量任务或证据，不再带分页索引，也没有定时心跳。运行中完整 attempt 通常在各 case 的 `run.json.task.attempts`；若某个 case 的记录写失败，错误和该 attempt 保存在回归 `state.json`。
 
 最终 `report.html` 每页最多渲染 100 个 case 或作业，可翻页、跳转页码和查看分析/证据链接。HTML 不建立连接、不读取实时文件、不设置刷新定时器。后续日志被覆盖或损坏时，用 `nsim report show <record_dir>` 重新校验；重跑和恢复仍以完整的最终记录为依据。
 

@@ -66,7 +66,7 @@ def task_row(task, journal):
     return dict(id=task['id'], case=task['case'], submit=task['submit_name'], seed=task['seed'],
                 verdict=verdict, errors=report.get('counts', {}).get('error', 0),
                 fatals=report.get('counts', {}).get('fatal', 0), location=location[:1024],
-                reason=(attempt.get('reason') or '')[:2048],
+                reason=(attempt.get('reason') or task.get('pending_reason') or '')[:2048],
                 analysis=quote(os.path.relpath(analysis, journal), safe='/') if analysis else None)
 
 

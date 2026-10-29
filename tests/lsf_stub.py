@@ -33,7 +33,8 @@ def main():
         with state_file(folder) as state:
             event(state, 'ATTEMPT', None)
             mode = state.get('submit_mode')
-            if mode == 'reject':
+            attempt_number = sum(item['kind'] == 'ATTEMPT' for item in state['events'])
+            if mode == 'reject' or attempt_number in state.get('reject_attempts', []):
                 print('Submission refused', file=sys.stderr)
                 return 1
             job_id = str(len(state['jobs']) + 1)
@@ -62,7 +63,9 @@ def main():
             job['queries'] += 1
             if state.get('query_stderr'):
                 print(state['query_stderr'], file=sys.stderr)
-            mode = state.get('query_mode')
+            mode = ('unknown' if job_id in state.get('unknown_job_ids', [])
+                    or any(name in job['cwd'] for name in state.get('unknown_cases', []))
+                    else state.get('query_mode'))
             if mode == 'malformed' or mode == 'transient' and job['queries'] <= 2:
                 print('temporary malformed response')
                 return 1

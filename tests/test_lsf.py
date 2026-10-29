@@ -119,6 +119,9 @@ class LsfTests(Fixture):
         self.assertFalse((record / 'final.json').exists())
         self.assertEqual(json.loads((record / 'live.json').read_text())['lifecycle'], 'unresolved')
         self.assertEqual(len(self.farm_state()['jobs']), 1)
+        self.assertEqual([task['status'] for task in state['tasks']],
+                         ['completed', 'planned', 'planned'])
+        self.assertIn('not executed', state['tasks'][1]['pending_reason'])
         self.assertTrue(list(self.out.rglob('.lsf-active.json')))
         self.assertTrue(list(self.out.rglob('.lsf-readers/*.json')))
         saved = json.loads((record / 'plan.json').read_text())
@@ -129,10 +132,78 @@ class LsfTests(Fixture):
 
     def test_lost_submission_reply_is_not_resubmitted(self):
         self.configure(submit_mode='no_id')
-        record, state = run(self.plan(), [self.out], jobs=1, retries=4)
+        record, state = run(self.plan(), [self.out], jobs=1)
         self.assertFalse(state['terminal'])
         self.assertEqual(len(self.farm_state()['jobs']), 1)
         self.assertFalse((record / 'final.json').exists())
+
+    def test_one_unknown_job_keeps_its_slot_while_other_slots_refill(self):
+        self.cases.write_text('slow\nfast\nthird\n')
+        self.configure(unknown_cases=['slow_42'])
+        record, state = run(self.plan(), [self.out], jobs=2)
+        self.assertFalse(state['terminal'])
+        self.assertFalse((record / 'final.json').exists())
+        self.assertEqual([task['effective_verdict'] for task in state['tasks']],
+                         ['LSF_UNKNOWN', 'PASS', 'PASS'])
+        self.assertEqual(len(self.farm_state()['jobs']), 3)
+        self.assertLessEqual(self.farm_state()['peak'], 2)
+        self.assertTrue(list(self.out.rglob('.lsf-active.json')))
+
+    def test_explicit_rejection_affects_only_one_job(self):
+        self.configure(reject_attempts=[1])
+        record, state = run(self.plan(), [self.out], jobs=1)
+        self.assertTrue(state['terminal'])
+        self.assertFalse(state['passed'])
+        self.assertEqual([task['effective_verdict'] for task in state['tasks']],
+                         ['SCHEDULER_ERROR', 'PASS', 'PASS'])
+        self.assertEqual(len(self.farm_state()['jobs']), 2)
+        self.assertTrue((record / 'final.json').exists())
+
+    def test_one_log_collection_failure_does_not_cancel_other_jobs(self):
+        from nsim.lsf_logs import Transcript
+        original = Transcript.finish
+        def fail_first(transcript, *args):
+            if 'smoke_42' in str(transcript.main):
+                raise OSError('run.log collection failed')
+            return original(transcript, *args)
+        with patch.object(Transcript, 'finish', fail_first):
+            _, state = run(self.plan(), [self.out], jobs=1)
+        self.assertEqual([task['effective_verdict'] for task in state['tasks']],
+                         ['SCHEDULER_ERROR', 'PASS', 'PASS'])
+        self.assertEqual(len(self.farm_state()['jobs']), 3)
+
+    def test_job_record_failure_after_submit_keeps_one_slot(self):
+        from nsim import lsf
+        original = lsf.write_json
+        plan = self.plan()
+        first_task = plan['tasks'][0]['id']
+        def fail_status(path, value):
+            if (path.name == 'job.json' and value.get('task_id') == first_task
+                    and value.get('status') == 'SUBMITTED'):
+                raise OSError('job status write failed')
+            return original(path, value)
+        with patch('nsim.lsf.write_json', side_effect=fail_status):
+            record, state = run(plan, [self.out], jobs=2)
+        self.assertFalse(state['terminal'])
+        self.assertFalse((record / 'final.json').exists())
+        self.assertEqual([task['effective_verdict'] for task in state['tasks']],
+                         ['LSF_UNKNOWN', 'PASS', 'PASS'])
+        self.assertTrue(list(self.out.rglob('.lsf-active.json')))
+        self.assertLessEqual(self.farm_state()['peak'], 2)
+
+    def test_failed_job_record_read_does_not_cancel_other_jobs(self):
+        from nsim import runner
+        self.configure(reject_attempts=[1])
+        original = runner.digest
+        def fail_first_record(path):
+            if Path(path).name == 'job.json' and 'smoke_42' in str(path):
+                raise OSError('job record read failed')
+            return original(path)
+        with patch('nsim.runner.digest', side_effect=fail_first_record):
+            _, state = run(self.plan(), [self.out], jobs=1)
+        self.assertEqual([task['effective_verdict'] for task in state['tasks']],
+                         ['SCHEDULER_ERROR', 'PASS', 'PASS'])
+        self.assertIn('job record read failed', state['tasks'][0]['attempts'][0]['scheduler_record_error'])
 
     def test_transient_query_errors_do_not_release_slots(self):
         self.configure(query_mode='transient')
@@ -368,8 +439,8 @@ Path(result).write_text(json.dumps({'schema_version':1,'case':case,'seed':int(se
         record, state = self.single_run()
         text = (record / 'run.log').read_text()
         self.assertIn('Submission refused', text)
-        self.assertIn('submission did not return one job ID', text)
-        self.assertIn('transcript incomplete', text)
+        self.assertIn('submission rejected', text)
+        self.assertIn('REJECTED', text)
         self.assertFalse(state['passed'])
         self.assertEqual(self.farm_state()['jobs'], {})
 

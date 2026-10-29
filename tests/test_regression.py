@@ -305,7 +305,7 @@ class RegressionTests(Fixture):
 class StorageRecoveryTests(Fixture):
     def test_missing_mount_is_not_recreated(self):
         missing = self.base / "missing-mount"
-        with self.assertRaisesRegex(OSError, 'no healthy output root'):
+        with self.assertRaisesRegex(OSError, 'storage root missing'):
             run(self.plan(), [missing])
         self.assertFalse(missing.exists())
         self.assertEqual(list(self.out.iterdir()), [])
@@ -323,43 +323,36 @@ class StorageRecoveryTests(Fixture):
                 preflight(self.out)
         self.assertEqual(failure.exception.errno, errno.EDQUOT)
 
-    def test_read_only_and_io_failure_are_classified(self):
-        for code, reason in ((errno.EROFS, "READ_ONLY"), (errno.EIO, "IO_ERROR"), (errno.EDQUOT, "QUOTA_EXCEEDED")):
+    def test_os_errors_preserve_errno_without_disk_diagnosis(self):
+        for code in (errno.EROFS, errno.EIO, errno.EDQUOT):
             with patch("nsim.runner.preflight", side_effect=OSError(code, "injected")):
-                journal, state = self.launch(retries=0)
+                journal, state = self.launch()
             self.assertFalse(state["passed"])
-            self.assertEqual(state["tasks"][0]["attempts"][0]["storage_error"]["reason"], reason)
+            self.assertEqual(state['tasks'][0]['attempts'][0]['failure']['errno'], code)
+            self.assertNotIn('storage_error', state['tasks'][0]['attempts'][0])
+            self.assertEqual(len(state['tasks'][0]['attempts']), 1)
             self.assertTrue((journal / "final.json").exists())
 
-    def test_failover_uses_new_attempt_and_retains_error(self):
-        def probe(root, *args):
-            if root == self.out:
-                raise OSError(errno.EIO, "injected disk failure")
-            return preflight(root, *args)
-        with patch("nsim.runner.preflight", side_effect=probe):
-            journal, state = run(self.plan(), [self.out, self.backup], retries=1)
-        self.assertTrue(state["passed"], state)
-        attempts = state["tasks"][0]["attempts"]
-        self.assertEqual([a["verdict"] for a in attempts], ["INFRA_ERROR", "PASS"])
-        self.assertNotEqual(attempts[0]["id"], attempts[1]["id"])
-        self.assertEqual(attempts[1]["parent"], attempts[0]["id"])
-        self.assertEqual(attempts[-1]["root"], str(self.backup))
-        self.assertTrue(load_final(journal)[1]["passed"])
+    def test_multiple_roots_require_explicit_selection(self):
+        with self.assertRaisesRegex(ConfigError, 'select exactly one output root'):
+            run(self.plan(), [self.out, self.backup])
+        self.assertEqual(list(self.out.iterdir()), [])
+        self.assertEqual(list(self.backup.iterdir()), [])
 
-    def test_retry_limit_prevents_automatic_failover(self):
+    def test_explicit_recovery_selects_a_new_root(self):
         self.cases.write_text("smoke\n")
         with patch('nsim.runner.preflight', side_effect=OSError(errno.EIO, 'runtime failure')):
-            journal, state = run(self.plan(), [self.out, self.backup], retries=0)
+            journal, state = run(self.plan(), [self.out])
         self.assertFalse(state["passed"])
         self.assertEqual(len(state["tasks"][0]["attempts"]), 1)
         _, recovered = replay(journal, roots=[self.backup], recovery=True)
         self.assertTrue(recovered["passed"])
 
-    def test_zero_retry_budget_is_bounded(self):
-        self.cases.write_text("smoke\n")
-        with patch('nsim.runner.preflight', side_effect=OSError(errno.EIO, 'runtime failure')):
-            _, state = run(self.plan(), [self.out, self.backup], retries=10, retry_seconds=0)
-        self.assertEqual(len(state["tasks"][0]["attempts"]), 1)
+    def test_removed_automatic_retry_options_are_rejected(self):
+        with self.assertRaisesRegex(ConfigError, 'automatic infrastructure retries'):
+            self.launch(retries=1)
+        with self.assertRaisesRegex(ConfigError, 'automatic infrastructure retries'):
+            self.launch(retry_seconds=1)
 
     def test_atomic_write_keeps_old_file_on_replace_failure(self):
         target = self.out / "report.json"
@@ -370,17 +363,40 @@ class StorageRecoveryTests(Fixture):
         self.assertEqual(target.read_bytes(), b"old")
         self.assertEqual(list(self.out.iterdir()), [target])
 
-    def test_output_record_failure_never_publishes_final(self):
-        from nsim import service
-        original = service.write_json
-        def fail_attempt(path, value):
-            if path.name == 'run.json' and value.get('lifecycle') == 'attempt_complete':
-                raise OSError(errno.ENOSPC, "output record storage full")
+    def test_one_case_record_write_failure_does_not_stop_other_cases(self):
+        from nsim import runner
+        original = runner.write_json
+        def fail_one_case(path, value):
+            if path.name == 'run.json' and path.parent.name == 'smoke_42':
+                raise OSError(errno.ENOSPC, 'case record full', str(path))
             return original(path, value)
-        with patch("nsim.service.write_json", side_effect=fail_attempt), patch("nsim.runner.write_json", side_effect=fail_attempt):
-            with self.assertRaises(OSError):
+        with patch('nsim.runner.write_json', side_effect=fail_one_case), \
+                patch('nsim.service.write_json', side_effect=fail_one_case):
+            journal, state = self.launch(jobs=1)
+        self.assertTrue(state['terminal'])
+        self.assertFalse(state['passed'])
+        self.assertEqual([t['effective_verdict'] for t in state['tasks']],
+                         ['INFRA_ERROR', 'PASS', 'PASS'])
+        self.assertIn('case record', state['tasks'][0]['attempts'][0]['reason'])
+        self.assertEqual(state['tasks'][0]['attempts'][0]['case_record_failure']['errno'], errno.ENOSPC)
+        self.assertTrue(state['tasks'][0]['attempts'][0]['case_record_failure']['path'].endswith('run.json'))
+        self.assertTrue((journal / 'final.json').exists())
+        self.assertEqual(len(load_final(journal)[1]['tasks']), 3)
+
+    def test_regression_state_write_failure_stops_new_dispatch(self):
+        from nsim import service
+        self.data['fake'] = {'durations': {'smoke': .02, 'fast': .5, 'slow': .02}}
+        self.save_submit()
+        original = service.write_json
+        def fail_checkpoint(path, value):
+            if path.name == 'state.json' and any(t['status'] == 'completed' for t in value['tasks']):
+                raise OSError(errno.ENOSPC, 'regression journal full', str(path))
+            return original(path, value)
+        with patch('nsim.service.write_json', side_effect=fail_checkpoint):
+            with self.assertRaisesRegex(OSError, 'regression state NOT persisted'):
                 self.launch(jobs=2)
-        self.assertEqual(list(self.out.rglob("final.json")), [])
+        self.assertFalse(list(self.out.rglob('final.json')))
+        self.assertEqual(len(list(self.out.rglob('run.log'))), 2)
 
     def test_final_report_write_failure_never_claims_pass(self):
         from nsim import service
@@ -398,17 +414,50 @@ class StorageRecoveryTests(Fixture):
         _, recovered = replay(journal, roots=[self.backup], recovery=True)
         self.assertTrue(recovered["passed"])
 
-    def test_runtime_evidence_write_error_triggers_failover(self):
+    def test_local_launch_error_does_not_block_later_cases(self):
         from nsim import runner
-        original = runner.write_json
-        def fail_metadata(path, value):
-            if self.out in path.parents:
-                raise OSError(errno.EIO, "disk stopped accepting writes")
-            return original(path, value)
-        with patch("nsim.runner.write_json", side_effect=fail_metadata):
-            _, state = run(self.plan(), [self.out, self.backup], jobs=1)
-        self.assertTrue(state["passed"])
-        self.assertEqual([a["verdict"] for a in state["tasks"][0]["attempts"]], ["INFRA_ERROR", "PASS"])
+        original = runner.execute_stage
+        def launch(request, *args):
+            if request['phase'] == 'simulate' and request['task']['case'] == 'smoke':
+                raise OSError(errno.EAGAIN, 'process creation failed')
+            return original(request, *args)
+        with patch('nsim.runner.execute_stage', side_effect=launch):
+            journal, state = self.launch(jobs=1)
+        self.assertEqual([t['effective_verdict'] for t in state['tasks']],
+                         ['INFRA_ERROR', 'PASS', 'PASS'])
+        self.assertEqual(state['tasks'][0]['attempts'][0]['failure']['errno'], errno.EAGAIN)
+        self.assertEqual(state['quarantined'], {})
+        self.assertTrue((journal / 'final.json').exists())
+
+    def test_local_compile_launch_error_does_not_block_later_cases(self):
+        from nsim import hooks
+        original = hooks.execute_stage
+        failed = False
+        def launch(request, *args):
+            nonlocal failed
+            if request['phase'] == 'compile' and not failed:
+                failed = True
+                raise OSError(errno.EAGAIN, 'compile process creation failed')
+            return original(request, *args)
+        with patch('nsim.hooks.execute_stage', side_effect=launch):
+            _, state = self.launch(jobs=1)
+        self.assertEqual([t['effective_verdict'] for t in state['tasks']],
+                         ['INFRA_ERROR', 'PASS', 'PASS'])
+        self.assertEqual(state['tasks'][0]['attempts'][0]['failure']['operation'], 'compilation')
+
+    def test_local_run_log_error_does_not_block_later_cases(self):
+        from nsim import runner
+        original = runner.execute_stage
+        def fail_log(request, *args):
+            if request['phase'] == 'simulate' and request['task']['case'] == 'smoke':
+                return dict(exit_code=None, started_at=time.time(), timed_out=False,
+                            error='run.log cannot be written', error_errno=errno.EIO)
+            return original(request, *args)
+        with patch('nsim.runner.execute_stage', side_effect=fail_log):
+            _, state = self.launch(jobs=1)
+        self.assertEqual([t['effective_verdict'] for t in state['tasks']],
+                         ['INFRA_ERROR', 'PASS', 'PASS'])
+        self.assertFalse(state['tasks'][0]['attempts'][0]['failure']['run.log_exists'])
 
     def test_reading_report_detects_deleted_log(self):
         journal, state = self.launch()

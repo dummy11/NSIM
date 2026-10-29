@@ -260,6 +260,25 @@ class BatchTests(Fixture):
         self.assertTrue(all(s['task_count'] == 24 and s['regression_count'] == 2 for s in brief))
         self.assertTrue(load_final(record)[1]['passed'])
 
+    def test_batch_dashboard_write_failure_does_not_cancel_child(self):
+        batch, entries = self.prepare([self.row()])
+        from nsim.batch import write_json as original
+        def fail_display(path, value):
+            if Path(path).name == 'live.json' and value.get('kind') == 'batch':
+                raise OSError('batch display unavailable')
+            return original(path, value)
+        with patch('nsim.batch.write_json', side_effect=fail_display):
+            journal, state = run_batch(batch, entries)
+        self.assertTrue(state['passed'])
+        self.assertTrue((journal / 'final.json').exists())
+        self.assertTrue(load_final(journal)[1]['passed'])
+
+    def test_batch_requires_one_explicit_output_root(self):
+        batch, entries = self.prepare([self.row()])
+        batch['output_roots'] = [str(self.out), str(self.backup)]
+        with self.assertRaisesRegex(ConfigError, 'select exactly one output root'):
+            run_batch(batch, entries)
+
     def test_casefold_conflict_in_later_row_is_prevalidated(self):
         other = self.project / 'invalid.list'
         other.write_text('smoke\nSMOKE\n')

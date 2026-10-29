@@ -78,7 +78,7 @@ class CaseRecordTests(Fixture):
         with self.assertRaisesRegex(IntegrityError, 'terminal completion'):
             replay(record)
 
-    def test_regression_writes_each_case_twice_and_full_state_once(self):
+    def test_regression_writes_each_case_twice_and_checkpoints_full_state(self):
         self.cases.write_text('\n'.join('case_%d' % i for i in range(16)))
         self.data['fake'] = {'outcomes': {'case_3': 'fail'}}
         self.save_submit()
@@ -90,7 +90,8 @@ class CaseRecordTests(Fixture):
         with patch('nsim.storage.atomic_write', side_effect=write):
             journal, state = run(plan, [self.out], jobs=4)
         self.assertEqual(writes[journal / 'plan.json'], 1)
-        self.assertEqual(writes[journal / 'state.json'], 1)
+        self.assertGreaterEqual(writes[journal / 'state.json'], len(plan['tasks']) + 2)
+        self.assertLessEqual(writes[journal / 'state.json'], 2 * len(plan['tasks']) + 2)
         self.assertEqual(writes[journal / 'final.json'], 1)
         self.assertFalse((journal / 'records').exists())
         for task in plan['tasks']:
@@ -152,19 +153,15 @@ class CaseRecordTests(Fixture):
         with self.assertRaisesRegex(IntegrityError, 'reference does not match'):
             replay(source, recovery=True)
 
-    def test_single_failover_retains_attempts_and_backup_reference(self):
-        def probe(root, *args):
-            if root == self.out:
-                raise OSError(errno.EIO, 'primary execution storage failed')
-            return preflight(root, *args)
-        with patch('nsim.runner.preflight', side_effect=probe):
-            record, state = run(self.one(), [self.out, self.backup], retries=1)
-        self.assertTrue(state['passed'])
-        self.assertEqual([a['verdict'] for a in state['tasks'][0]['attempts']], ['INFRA_ERROR', 'PASS'])
-        backup = Path(state['tasks'][0]['attempts'][-1]['cwd'])
-        self.assertTrue(load_final(record)[1]['passed'])
+    def test_single_failure_requires_explicit_recovery_root(self):
+        with patch('nsim.runner.preflight', side_effect=OSError(errno.EIO, 'execution failed')):
+            record, state = run(self.one(), [self.out])
+        self.assertFalse(state['passed'])
+        self.assertEqual(len(state['tasks'][0]['attempts']), 1)
+        backup, recovered = replay(record, roots=[self.backup], recovery=True)
+        self.assertTrue(recovered['passed'])
         self.assertTrue(load_final(backup)[1]['passed'])
-        self.assertEqual(len(json.loads((backup / 'run.json').read_text())['task']['attempts']), 2)
+        self.assertEqual(recovered['tasks'][0]['parent']['attempt'], state['tasks'][0]['attempts'][0]['id'])
 
     def test_legacy_single_record_can_be_read_and_rerun(self):
         self.data['fake'] = {'outcomes': {'smoke': 'fail'}}

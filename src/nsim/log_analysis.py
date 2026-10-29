@@ -16,7 +16,18 @@ SUMMARY = re.compile(r'^\s*UVM_(WARNING|ERROR|FATAL)\s*:\s*(\d+)\s*$')
 UVM = re.compile(r'^\s*UVM_(WARNING|ERROR|FATAL)(?:\([^)]*\))?\s+(.*?)\s*@\s*([^:]+):\s*(.*?)\s*\[([^]]*)\]\s*(.*)$')
 VCS = re.compile(r'^\s*(Warning|Error|Fatal)-\[([^]]+)\]\s*(.*)$', re.I)
 RUNTIME = re.compile(r'^\s*(Warning|Error|Fatal):\s*(.+)$', re.I)
-LOCATION = re.compile(r'"([^"\n]+)"\s*,\s*(\d+)|\b([^\s,()]+\.(?:svh?|vh?|vhd|vhdl|c|cpp|h))\((\d+)\)|\b([^\s,:]+\.(?:svh?|vh?|vhd|vhdl|c|cpp|h))\s*[:,]\s*(\d+)')
+SOURCE_SUFFIX = r'(?:svh?|vh?|vhd|vhdl|c|cpp|h)'
+SOURCE_PATH = rf'(?P<path>[^,\r\n:()]+?\.{SOURCE_SUFFIX})'
+SIMPLE_SOURCE_PATH = rf'(?P<path>[^,\s:()]+?\.{SOURCE_SUFFIX})'
+SOURCE_LINE = r'(?:\((?P<paren>\d+)\)|\s*[:,]\s*(?P<number>\d+))(?=$|[\s,:;)\]])'
+QUOTED_LOCATION = re.compile(
+    rf'(?P<quote>["\'])(?P<path>[^"\'\r\n]+?\.{SOURCE_SUFFIX})(?P=quote)\s*'
+    r'(?:,\s*(?P<number>\d+)|:\s*(?P<colon>\d+)|\(\s*(?P<paren>\d+)\s*\))'
+    r'(?=$|[\s,:;)\]])', re.I)
+AT_LOCATION = re.compile(r'\bat\s+' + SOURCE_PATH + SOURCE_LINE, re.I)
+SIMPLE_MARKED_LOCATION = re.compile(
+    r'\b(?:in|from)\s+' + SIMPLE_SOURCE_PATH + SOURCE_LINE, re.I)
+BARE_LOCATION = re.compile(r'(?:^|[:,;(\[])\s*' + SIMPLE_SOURCE_PATH + SOURCE_LINE, re.I)
 
 
 def config(value):
@@ -44,11 +55,19 @@ def config(value):
 
 
 def location(text):
-    match = LOCATION.search(text)
-    if match:
-        for index in (1, 3, 5):
-            if match.group(index):
-                return {'source_file': match.group(index), 'source_line': int(match.group(index + 1))}
+    # Unquoted paths containing spaces need a clear left boundary. Never fall
+    # back to the last whitespace-delimited suffix, which invents a file path.
+    for pattern in (QUOTED_LOCATION, AT_LOCATION, SIMPLE_MARKED_LOCATION, BARE_LOCATION):
+        match = pattern.search(text)
+        if not match:
+            continue
+        path = match.group('path').strip()
+        if pattern is BARE_LOCATION and re.match(r'(?i)^(?:error|fatal|warning|in|from|at)\b', path):
+            continue
+        line = next((match.group(key) for key in ('number', 'colon', 'paren')
+                     if key in match.re.groupindex and match.group(key)), None)
+        if path and line:
+            return {'source_file': path, 'source_line': int(line)}
     return {}
 
 

@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from nsim.log_analysis import brief, case_summary, config, scan, validate_custom, wait_stable
+from nsim.log_analysis import brief, case_summary, config, location, scan, validate_custom, wait_stable
 from nsim.error_filter import load as load_filter
 from nsim.config import ConfigError
 from nsim.storage import digest
@@ -90,6 +90,33 @@ class LogAnalysisTests(unittest.TestCase):
         self.assertEqual((result['counts']['error'], result['counts']['fatal']), (1, 1))
         self.assertEqual(result['diagnostics'][0]['source_line'], 19)
         self.assertEqual(result['diagnostics'][1]['source_file'], 'tb.sv')
+
+    def test_location_keeps_spaces_and_absolute_root_without_guessing_ambiguous_text(self):
+        samples = {
+            'at dir with spaces/file.sv:123': ('dir with spaces/file.sv', 123),
+            'at /home/user/rtl/top.sv:123': ('/home/user/rtl/top.sv', 123),
+            '"dir with spaces/file.sv", 123': ('dir with spaces/file.sv', 123),
+            'at /home/user/rtl/top.sv(123)': ('/home/user/rtl/top.sv', 123),
+            'in rtl/top.sv:17': ('rtl/top.sv', 17),
+            'Fatal: tb.sv:61': ('tb.sv', 61),
+            'syntax (rtl/top.sv:19)': ('rtl/top.sv', 19),
+        }
+        for text, (source, line) in samples.items():
+            with self.subTest(text=text):
+                self.assertEqual(location(text), {'source_file': source, 'source_line': line})
+        self.assertEqual(location('Error near dir with spaces/file.sv:123'), {})
+        self.assertEqual(location('a message mentions /home/user/rtl/top.sv:123'), {})
+        self.assertEqual(location('dir with spaces/file.sv:123'), {})
+
+    def test_scanned_diagnostic_uses_complete_path_or_only_log_line(self):
+        result = self.analyze('Error-[SE] Syntax error\n  at dir with spaces/file.sv:123\n')
+        self.assertEqual(result['first_failure']['source_file'], 'dir with spaces/file.sv')
+        self.assertEqual(result['first_failure']['source_line'], 123)
+        result = self.analyze('Error-[SE] Syntax error\n  at /home/user/rtl/top.sv:123\n')
+        self.assertEqual(result['first_failure']['source_file'], '/home/user/rtl/top.sv')
+        result = self.analyze('Error-[SE] Syntax error\n  Error near dir with spaces/file.sv:123\n')
+        self.assertNotIn('source_file', result['first_failure'])
+        self.assertEqual(result['first_failure']['log_line'], 1)
 
     def test_warnings_and_ansi_and_no_filename(self):
         result = self.analyze('\x1b[31mUVM_FATAL @ 5: top [STOP] bad\x1b[0m\r\nWarning-[WIDTH] mismatch\n')

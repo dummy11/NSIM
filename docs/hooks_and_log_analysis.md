@@ -108,7 +108,7 @@ LSF 下，真实编译阶段及其 hooks 在一个编译 job 内执行；仿真�
 
 支持标准 UVM WARNING/ERROR/FATAL 消息（含可选 verbosity、源码文件/行、仿真时间、component、report ID）、UVM severity 汇总，以及 VCS `Warning-[CODE]`、`Error-[CODE]`、`Fatal-[CODE]` 和运行期 `Warning:`/`Error:`/`Fatal:` 格式。VCS 后续行中的 `"file.sv", line` 等位置会关联到前面的诊断；保留最多六行上下文。ANSI 颜色控制符会去除，异常编码按替换字符读取。
 
-UVM 格式依据 [Accellera 官方 report server](https://github.com/accellera-official/uvm-core/blob/main/src/base/uvm_report_server.svh)。源码位置本来就是可选信息，缺失时只提供日志位置，不编造源码位置。自定义 report server、厂商版本特有格式或项目特殊断言格式可使用自定义 log_analysis hook。
+UVM 格式依据 [Accellera 官方 report server](https://github.com/accellera-official/uvm-core/blob/main/src/base/uvm_report_server.svh)。源码位置本来就是可选信息，缺失时只提供日志位置，不编造源码位置。位置解析保留 `at dir with spaces/file.sv:123` 中的完整路径及 `at /home/user/top.sv:123` 的开头 `/`；未加引号、含空格且没有明确 `at` 边界的文字不猜测源码路径。自定义 report server、厂商版本特有格式或项目特殊断言格式可使用自定义 log_analysis hook。
 
 解析器不会把 `UVM_ERROR : 0` 或普通 INFO 消息中的 “error” 字样当成错误。同一日志的 UVM 明细数和汇总数取较大值，不重复相加；只有汇总而缺少明细时仍报告错误，但无法给出不存在的源码位置。各输入日志分别计数，如果同一批消息同时镜像到多个文件，应只配置一份主日志，避免镜像重复计数。
 

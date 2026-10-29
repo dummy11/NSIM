@@ -20,8 +20,7 @@ def preview(source, work, queue=None):
     work.mkdir(parents=True, exist_ok=False)
     config = work / 'profile'
     config.mkdir()
-    for directory in ('output', 'events'):
-        (work / directory).mkdir()
+    (work / 'output').mkdir()
     import json
     descriptor = config / 'nsim.toml'
     descriptor.write_text('schema_version = 1\nname = "npu8860-acc-preview"\nsource_root = ' + json.dumps(str(source)) +
@@ -41,7 +40,7 @@ def preview(source, work, queue=None):
                                                 'uvm-1.2', '+define+UVM_NO_DEPRECATED', '+define+RD=0.1']}})
     plan = create_plan(descriptor, caselist=cases, submit_paths=[submit], seeds=[42], allow_missing_tools=True)
     before = dict(plan['input_hashes'])
-    journal, _ = run(plan, [work / 'output'], work / 'events', dry_run=True)
+    journal, _ = run(plan, [work / 'output'], dry_run=True)
     unchanged = all(digest(Path(path)) == expected for path, expected in before.items())
     summary = {'schema_version': 1, 'executed': False, 'journal': str(journal), 'tasks': len(plan['tasks']),
                'input_count': len(before), 'inputs_unchanged': unchanged,

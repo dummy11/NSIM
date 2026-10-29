@@ -1,12 +1,34 @@
-# NSIM
+# NSIM 开发仓库
 
-NSIM 是开发 `nsim` 的仓库与开发环境，包含源码、测试、示例工程和设计文档。`nsim` 是从这里构建和安装的 Python 命令行工具，面向 ASIC 工程组织仿真回归。当前工具提供可运行的本地流程：工程发现、配置校验、case × submit × seed 展开、滚动并发、结果检查、独立输出、失败重跑和备用存储恢复。
+NSIM 用于开发、测试和发布 `nsim`，保存工具源码、测试、示例与设计文档。安装后的 `nsim` 是面向 ASIC 验证工程的 Python 命令行工具。本文面向仓库开发者；安装和日常使用请从 [nsim 使用指南](user_guide.md) 开始。
 
-执行使用 fake simulator 或工程提供的命令包装器；新增 VCS、DPI、Verdi、LSF 配置与命令预览，见 [EDA dry-run](docs/eda_dry_run.md)。原生执行适配器仍未完成。合并实现授权和验证记录见 [实现状态](docs/implementation_status.md)。
+## 名称与文档范围
 
-## 安装
+| 名称 | 含义 | 文档入口 |
+| --- | --- | --- |
+| **NSIM** | 开发仓库与开发环境：源码、架构、测试、构建和发布 | 本 README 及下方开发文档 |
+| **nsim** | 安装后的 Python 包与 CLI：项目管理、编译、仿真、回归和报告 | [nsim 使用指南](user_guide.md)及其专题文档 |
+| 验证工程 | 工程自己的 RTL、testbench、filelist、caselist 和 submit 配置 | 由 nsim 注册和使用，保存在工程目录中 |
 
-需要 Python 3.9+，本地进程执行目前面向 POSIX（Linux/macOS）。
+正文用 `NSIM` 指仓库、`nsim` 指工具。已有环境变量、接口字段、文件路径与真实终端输出保持原有拼写。
+
+## 仓库结构
+
+| 路径 | 内容 |
+| --- | --- |
+| `src/nsim/` | 版本化 Python 包的实现 |
+| `nsim-install.py` | 独立安装器与稳定启动器 |
+| `tests/` | 单元测试、流程测试和本地 LSF 测试服务 |
+| `examples/` | fake 示例项目及参考工程 dry-run 脚本 |
+| `scripts/` | 项目发现代码同步和分发内容检查 |
+| `pyproject.toml`、`MANIFEST.in` | 包版本、依赖、入口和分发文件定义 |
+| `docs/`、`user_guide.md` | 开发文档与工具使用文档 |
+
+工具安装、ASIC 工程和仿真输出分别管理。wheel 交付 Python 包及 CLI；安装器另行交付，工程源码和运行产物不进入 wheel。
+
+## 准备开发环境
+
+需要 Python 3.9+，执行与锁测试当前面向 POSIX（Linux/macOS）。取得源码后在 NSIM 仓库根目录运行：
 
 ```sh
 python3 -m venv .venv
@@ -16,87 +38,51 @@ python3 -m venv .venv
 .venv/bin/nsim version --json
 ```
 
-TOML/YAML 分别使用 tomli（Python <3.11）和 PyYAML。上面的 `.venv` 是开发环境；用户安装可使用根目录的 `nsim-install.py` 创建稳定 `nsim` 启动器，离线导入 wheel 及依赖，并由每个工程的 `.nsim/.nsim_version` 选择版本。
+开发环境的 `.venv/bin/nsim` 直接运行当前源码。面向用户的稳定 `nsim` 启动器由 `nsim-install.py` 创建，负责版本安装和按项目分派；使用方法见 [工具安装指南](user_guide.md#安装器和版本目录)。克隆仓库或 editable install 本身不会把候选版本导入稳定启动器的版本库。
 
-版本控制、打包、发布及远端获取见 [使用指南](user_guide.md)；构建细节见 [打包与发布](docs/releasing.md)。
+## 运行开发测试
 
-## 注册和维护验证项目
-
-先按使用指南将候选 wheel 或离线包安装到版本目录，然后使用稳定 `nsim` 入口：
+执行测试和实际任务都需要系统级[环境只读保护](docs/read_only_environment.md)：Linux 提供 `bwrap`
+及 namespace 支持，macOS 允许启动 `sandbox-exec`。缺少后端时执行会失败，不降级为可写源码。
 
 ```sh
-nsim bootstrap --name conv_verif --rtl-root /work/rtl --rtl-filelist /work/rtl/rtl.f
-nsim list
-cd conv_verif
-nsim status
-nsim update --rtl-root /work/rtl_next --rtl-filelist /work/rtl_next/rtl.f
-nsim switch latest
+.venv/bin/python scripts/sync_project_layout.py --check
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
-bootstrap 默认创建 `verification/`；`--name` 改变目录名。项目配置和版本文件统一位于 `.nsim/`，并创建 `submit/`、`filelist/tb.f` 和工具管理的组合来源说明。省略版本时只在新项目选择最新已安装稳定版。支持已有目录接入、子目录识别、重名保护、事务更新和缺失版本诊断。完整参数、路径语义与兼容行为见 [使用指南](user_guide.md)。
+测试使用 fake/command、本地进程级 LSF 服务、合成日志和存储故障注入。它们验证工具行为，真实商业 EDA、LSF 集群、共享文件系统和目标机安装仍需单独验收。按日期保存的验证范围见 [实现状态与验证记录](docs/implementation_status.md)。
 
-## 跑一次本地回归
+## 仓库 smoke 示例
 
-以下命令使用保留的 schema 1 fake 示例，在 NSIM 仓库根目录执行。`project list <目录>` 是文件扫描，不会注册项目。输出与控制事件目录必须预先存在，并位于工具和 ASIC 源码树之外。根目录缺失时不会自动创建，以免把掉线挂载误当成普通目录。
+以下示例使用仓库内的 fake 项目，已显式配置 local，无需商业工具或 LSF。输出根必须预先存在，并位于工具与工程源码树之外：
 
 ```sh
-mkdir -p /tmp/nsim-output /tmp/nsim-backup /tmp/nsim-events
+mkdir -p /tmp/nsim-output /tmp/nsim-backup
 .venv/bin/nsim project list examples/projects
-.venv/bin/nsim run regression \
+.venv/bin/nsim regr \
   --project examples/projects/fake \
   --caselist examples/projects/fake/smoke.caselist \
   --submit examples/projects/fake/pass.json \
   --seed 42 --jobs 2 \
   --output-root /tmp/nsim-output \
-  --output-root /tmp/nsim-backup \
-  --event-root /tmp/nsim-events
+  --output-root /tmp/nsim-backup
 ```
 
-命令返回 JSON，其中 `journal` 是本次运行的控制记录目录。每次调用分配独立 regression id，不覆盖上次结果。`--output-root` 可重复配置备用位置，也可通过 `NSIM_OUTPUT_ROOT` 设置单一默认输出位置；事件目录可由 `NSIM_EVENT_ROOT` 设置。
+命令返回本次 `record_dir`。增加 `--submit examples/projects/fake/fail.json` 可演示未比较和性能失败，此时预期返回非零状态；增加 `--dry-run` 可只保存计划和预览。每次回归使用独立目录，汇总文件位于 `regr_dir/<id>/report/`；批量入口见 [Regression list](docs/regression_batches.md)。报告、重跑与证据规则见 [nsim 使用指南](user_guide.md#检查报告重跑和恢复)。
 
-- 增加 `--submit examples/projects/fake/fail.json` 演示未比较和性能失败；这次回归应返回非零状态。
-- 重复 `--seed 42 --seed 43` 展开多个 seed。未指定时生成一个有效 seed 并保存在计划中。
-- 增加 `--dry-run` 只保存计划、检查存储并创建输出结构，不运行仿真，也不发布最终通过标记。
-- 使用 `run case --case smoke` 替代 `run regression --caselist ...` 执行单个 case，其余参数相同。
+## 构建与交付
 
-## 检查报告、重跑和恢复
+`pyproject.toml` 是包版本的唯一来源，当前工作区使用候选 `0.1.0`。构建 wheel/sdist、分发内容核验、离线包制作和 Release 流程统一见 [构建与发布 nsim](docs/releasing.md)。验证记录只对应当时源码；发布时重新核对提交、版本、制品和目标环境。
 
-将下面路径替换为命令实际返回的 `journal`：
+## 开发文档
 
-```sh
-.venv/bin/nsim report show /tmp/nsim-events/<regression-id>
-.venv/bin/nsim report show /tmp/nsim-events/<regression-id> --json
-.venv/bin/nsim rerun /tmp/nsim-events/<regression-id>
-.venv/bin/nsim recover /tmp/nsim-events/<regression-id> --output-root /tmp/nsim-backup
-.venv/bin/nsim storage check /tmp/nsim-output --min-free-bytes 104857600
-```
+| 主题 | 文档 |
+| --- | --- |
+| 目标、范围和接口决策 | [开发规划](docs/plan.md) |
+| 模块、数据流与执行契约 | [nsim 实现架构](docs/architecture.md) |
+| 逻辑用例、seq/plusargs、自定义映射与 demo | [Caselist 语法](docs/caselist.md) |
+| 当前实现和历史验证范围 | [实现状态](docs/implementation_status.md) |
+| 待实现功能及真实环境验收 | [开发待办](docs/backlog.md) |
+| 构建、模板说明同步与发布 | [构建与发布](docs/releasing.md) |
 
-`rerun` 仅重跑最终未通过的任务，默认保持原 seed、submit、显式环境和输入身份。`--seed` 可显式改变 seed，来源与变化保存在新计划中。`recover` 选择存储/证据不完整的任务；若整个报告发布失败，则重新运行相关任务以生成完整报告。两者都创建新运行和新 attempt，保留原日志、错误与来源关系。
-
-执行配置、声明的输入、命令可执行文件、`nsim` 源文件或已记录依赖版本变化时拒绝精确重跑。schema 2 注册配置使用历史快照，更新登记不替换旧回归的输入绑定。损坏的结果文件会让原通过结果显示为 INCOMPLETE；丢失或损坏的控制记录不允许自动恢复。控制器异常退出、旧任务状态未知时，也拒绝自动重叠派发。
-
-自动故障转移通过 `--retries`（默认 1）和 `--retry-seconds`（默认 120）限制。检测到存储 I/O 失败后，该输出根在本次运行内被隔离；新 attempt 可以使用尚未隔离的备用根。没有健康位置时保留失败，不盲目重复写故障盘。功能 FAIL 不自动重试。
-
-## 证据与输出
-
-- 控制目录：`plan.json`、独立 attempt 记录、实时 `live.json/live.html`、最终 `state.json`、`report.md/report.html`、`failed.json`。
-- `final.json` 最后发布，校验计划、状态、报告和失败清单；缺失时不能把该批次作为可重跑的终态。
-- 仿真输出：`<output-root>/regressions/<id>/{config,build,tasks,logs,waves,reports}`。任务文件进一步按 task id 和 attempt id 隔离。
-- 输出目录中的报告链接指向控制目录的唯一最终报告，不在不同盘上维护相互矛盾的通过状态。
-- `report show` 会重新校验证据 hash。HTML 是生成时的快照，后续存储损坏须通过命令重新检查。
-
-## 接入工程命令
-
-工程命令接收 `{case}`、`{seed}`、`{result}`、`{project}`、`{wave_dir}` 等参数，并在 `result` 路径写入版本化 JSON。参数通过 argv 传递，不经过 shell。项目特定 Golden 或性能公式由工程包装器判断，`nsim` 汇总必需检查。完整格式见 [本地接口](docs/local_execution.md)。
-
-`nsim` 本身不执行 git pull、不清理历史输出。工程包装器也应遵守只读输入和独立输出契约；任意第三方命令的内部副作用并非由 `nsim` 沙箱隔离。
-
-## 验证与边界
-
-```sh
-.venv/bin/python -m unittest discover -s tests -v
-```
-
-存储测试通过故障注入完成，不损坏真实磁盘。可检测已返回的 I/O 错误、空间/inode 阈值和路径不可用；配额无法查询时标记 unknown，实际 EDQUOT 写入错误会被记录。目录预检会做一次小文件写入/readback/fsync，并在进程结束后复检。
-
-生产环境应把事件目录和备用输出放到独立故障域。不同目录不等于不同物理磁盘，本地工具不能证明存储冗余；也不能仅凭目录存在证明预期远端挂载在线。若内核 I/O 陷入不可中断等待，应用层重试预算不能保证终止该系统调用。断电持久性、备份恢复、修盘及仿真断点续跑不在当前能力内。
+工具使用专题由 [nsim 使用指南](user_guide.md#阅读入口)统一导航。

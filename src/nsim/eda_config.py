@@ -11,8 +11,9 @@ def text(value, label):
 
 def scheduler_config(value):
     fields(value, {"kind", "queue", "resources", "licenses", "bsub", "bjobs", "bkill",
-                   "poll_seconds", "deadline_seconds", "cancel_seconds", "worker_python"}, set(), "scheduler")
-    kind = value.get("kind", "local")
+                   "poll_seconds", "deadline_seconds", "cancel_seconds", "worker_python",
+                   "command_timeout_seconds", "unknown_seconds", "result_wait_seconds"}, set(), "scheduler")
+    kind = value.get("kind", "lsf")
     if kind not in ("local", "lsf"):
         raise ConfigError("scheduler kind must be local or lsf")
     licenses = value.get("licenses", {})
@@ -26,7 +27,9 @@ def scheduler_config(value):
         text(value["queue"], "queue")
     for key in ("bsub", "bjobs", "bkill"):
         result[key] = text(value.get(key, key), key)
-    for key, default, minimum in (("poll_seconds", 1, .01), ("deadline_seconds", 3600, .01), ("cancel_seconds", 30, .01)):
+    for key, default, minimum in (("poll_seconds", 1, .01), ("deadline_seconds", 3600, .01),
+                                  ("cancel_seconds", 30, .01), ('command_timeout_seconds', 30, .01),
+                                  ('unknown_seconds', 30, .01), ('result_wait_seconds', 5, .01)):
         result[key] = number(value.get(key, default), key, minimum)
     if "worker_python" in value:
         text(value["worker_python"], "worker_python")

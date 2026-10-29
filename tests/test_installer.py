@@ -2,6 +2,8 @@
 
 import base64
 import hashlib
+import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -9,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 
@@ -50,6 +53,9 @@ class InstallerTests(unittest.TestCase):
         self.project = self.base / "project"
         self.project.mkdir()
         (self.project / "nsim.toml").write_text('schema_version = 1\nname = "demo"\n')
+        spec = importlib.util.spec_from_file_location('nsim_installer', SCRIPT)
+        self.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.module)
 
     def installer(self, *args, success=True, cwd=None, env=None):
         result = subprocess.run([sys.executable, str(SCRIPT), *map(str, args)], cwd=cwd,
@@ -59,6 +65,87 @@ class InstallerTests(unittest.TestCase):
         else:
             self.assertNotEqual(result.returncode, 0)
         return result
+
+    def test_shared_launcher_installs_for_current_user(self):
+        self.installer('bootstrap', '--root', self.root)
+        launcher = self.root / 'bin' / 'nsim'
+        original_launcher = launcher.read_bytes()
+        home = self.base / 'user-home'
+        user_root = home / '.local' / 'share' / 'nsim'
+        environment = dict(os.environ, HOME=str(home), NSIM_HOME=str(self.root))
+        for version, scope in [('0.1.0', []), ('0.2.0', ['--user'])]:
+            wheel = test_wheel(self.base, version)
+            result = subprocess.run([launcher, 'install', '--wheel', str(wheel), *scope],
+                                    cwd=self.base, env=environment, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((user_root / 'versions' / version / 'receipt.json').is_file())
+        self.assertEqual(list((self.root / 'versions').iterdir()), [])
+        self.assertEqual(launcher.read_bytes(), original_launcher)
+        result = subprocess.run([user_root / 'bin' / 'nsim', '--version'], cwd=self.base,
+                                env=dict(environment, NSIM_VERSION='0.2.0'), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'nsim 0.2.0')
+        # Ordinary queries continue to use the invoked launcher's own version store.
+        result = subprocess.run([launcher, 'versions'], cwd=self.base, env=environment,
+                                capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), 'installed: none')
+
+    def test_system_bundle_install_and_other_user_launch(self):
+        wheel = test_wheel(self.base, '0.1.0')
+        bundle = self.base / 'bundle.tar.gz'
+        self.installer('bundle', 'create', '--wheel', wheel, '--output', bundle)
+        # Redirect the system prefix only in this test; never write to the real /opt.
+        shared_root = self.base / 'shared'
+        with patch.object(self.module, 'SYSTEM_ROOT', shared_root), patch('sys.stdout', new_callable=io.StringIO):
+            self.assertEqual(self.module.main(['install', '--bundle', str(bundle), '--system']), 0)
+        self.assertTrue((shared_root / 'versions' / '0.1.0' / 'receipt.json').is_file())
+        other_home = self.base / 'other-home'
+        result = subprocess.run([shared_root / 'bin' / 'nsim', '--version'], cwd=self.base,
+                                env=dict(os.environ, HOME=str(other_home), NSIM_VERSION='0.1.0'),
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'nsim 0.1.0')
+        self.assertFalse((other_home / '.local' / 'share' / 'nsim').exists())
+
+    def test_install_destinations_apply_to_remote_versions_and_all(self):
+        home = self.base / 'user-home'
+        user_root = home / '.local' / 'share' / 'nsim'
+        destinations = [([], user_root), (['--user'], user_root),
+                        (['--system'], Path('/opt/nsim')), (['--root', str(self.root)], self.root)]
+        with patch.dict(os.environ, HOME=str(home), NSIM_HOME=str(self.base / 'env-root')):
+            for flags, expected in destinations:
+                for source, versions in [(['0.1.0'], ['0.1.0']), (['--all'], ['0.1.0', '0.2.0'])]:
+                    with self.subTest(flags=flags, source=source), \
+                            patch.object(self.module, 'remote_versions', return_value=versions), \
+                            patch.object(self.module, 'install_remote') as install:
+                        self.assertEqual(self.module.main(['install', *source, *flags]), 0)
+                        self.assertEqual([call.args for call in install.call_args_list],
+                                         [(expected.resolve(), version) for version in versions])
+        self.assertFalse((home / '.local' / 'share' / 'nsim').exists())
+
+    def test_conflicting_install_destinations_fail_before_writing(self):
+        wheel = test_wheel(self.base, '0.1.0')
+        home = self.base / 'user-home'
+        environment = dict(os.environ, HOME=str(home), NSIM_HOME=str(self.root))
+        for flags in [('--user', '--system'), ('--user', '--root', self.root),
+                      ('--root', self.root, '--system')]:
+            with self.subTest(flags=flags):
+                result = self.installer('install', '--wheel', wheel, *flags, env=environment, success=False)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn('not allowed with argument', result.stderr)
+        self.assertFalse(self.root.exists())
+        self.assertFalse((home / '.local' / 'share' / 'nsim').exists())
+
+    def test_system_permission_failure_does_not_fall_back_to_user_install(self):
+        home = self.base / 'user-home'
+        wheel = test_wheel(self.base, '0.1.0')
+        with patch.dict(os.environ, HOME=str(home)), \
+                patch.object(self.module, 'bootstrap', side_effect=PermissionError(13, 'Permission denied', '/opt/nsim')), \
+                patch('sys.stderr', new_callable=io.StringIO) as error:
+            self.assertEqual(self.module.main(['install', '--wheel', str(wheel), '--system']), 2)
+        self.assertIn('/opt/nsim', error.getvalue())
+        self.assertNotIn('Traceback', error.getvalue())
+        self.assertFalse((home / '.local' / 'share' / 'nsim').exists())
 
     def test_offline_install_switch_and_historical_dispatch(self):
         for version in ("0.1.0", "0.2.0"):
@@ -84,6 +171,29 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "nsim 0.2.0", result.stderr)
         result = subprocess.run([launcher, "rerun", str(journal)], cwd=self.project, capture_output=True, text=True)
         self.assertEqual(result.stdout.strip(), f"0.1.0 rerun {journal}", result.stderr)
+        for prefix in (['-o', str(self.base / 'out')], ['--output-root=' + str(self.base / 'out')]):
+            result = subprocess.run([launcher, *prefix, 'rerun', str(journal)], cwd=self.project,
+                                    capture_output=True, text=True)
+            self.assertEqual(result.stdout.strip(), f"0.1.0 {' '.join(prefix)} rerun {journal}", result.stderr)
+        simulation = self.base / 'simulation'
+        simulation.mkdir()
+        (simulation / 'run.json').write_text(json.dumps({'record_dir': str(journal)}))
+        for command in (['rerun'], ['recover'], ['report', 'show']):
+            result = subprocess.run([launcher, *command, str(simulation)], cwd=self.project,
+                                    capture_output=True, text=True)
+            self.assertEqual(result.stdout.strip(), f"0.1.0 {' '.join(command)} {simulation}", result.stderr)
+        (simulation / 'run.json').write_text(json.dumps({
+            'schema_version': 2, 'plan': {'runtime': {'version': '0.1.0'}}}))
+        for command in (['rerun'], ['recover'], ['report', 'show']):
+            result = subprocess.run([launcher, *command, str(simulation)], cwd=self.project,
+                                    capture_output=True, text=True)
+            self.assertEqual(result.stdout.strip(), f"0.1.0 {' '.join(command)} {simulation}", result.stderr)
+        (simulation / 'run.json').write_text('{"record_dir": null}')
+        result = subprocess.run([launcher, 'rerun', str(simulation)], cwd=self.project,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('invalid simulation record reference', result.stderr)
+        self.assertNotIn('Traceback', result.stderr)
 
     def test_failed_checksum_does_not_change_project_pin(self):
         wheel = test_wheel(self.base, "0.1.0")
@@ -103,9 +213,9 @@ class InstallerTests(unittest.TestCase):
         self.installer("install", "--wheel", wheel, "--checksums", sums, "--root", self.root)
         self.installer("switch", "0.1.0", "--project", self.project, "--root", self.root)
         launcher = self.root / "bin" / "nsim"
-        result = subprocess.run([launcher, "run", "case", "--project=" + str(self.project)],
+        result = subprocess.run([launcher, "run", "--project=" + str(self.project)],
                                 capture_output=True, text=True)
-        self.assertEqual(result.stdout.strip(), f"0.1.0 run case --project={self.project}", result.stderr)
+        self.assertEqual(result.stdout.strip(), f"0.1.0 run --project={self.project}", result.stderr)
 
     def test_remote_release_download_and_all_versions(self):
         wheels = {version: test_wheel(self.base, version) for version in ("0.1.0", "0.2.0")}

@@ -40,20 +40,40 @@ class Fixture(unittest.TestCase):
         self.out = self.base / "out"
         self.backup = self.base / "backup"
         self.events = self.base / "events"
-        for path in (self.out, self.backup, self.events):
+        for path in (self.out, self.backup):
             path.mkdir()
 
     def save_submit(self):
+        self.data.setdefault('scheduler', {'kind': 'local'})
         write_json(self.submit, self.data)
 
     def plan(self, **kwargs):
         return create_plan(self.project, caselist=self.cases, submit_paths=[self.submit], seeds=[42], **kwargs)
 
     def launch(self, **kwargs):
-        return run(self.plan(), [self.out], self.events, **kwargs)
+        return run(self.plan(), [self.out], **kwargs)
 
 
 class ConfigurationTests(Fixture):
+    def test_legacy_storage_environment_fallback_and_missing_default_guidance(self):
+        args = [sys.executable, '-m', 'nsim', 'run', '--project', str(self.project),
+                '--case', 'smoke', '--submit', str(self.submit), '--seed', '42']
+        environment = {k: v for k, v in os.environ.items() if k not in ('NSIM_OUTPUT_ROOT', 'NSIM_EVENT_ROOT')}
+        missing = subprocess.run(args, env=environment, capture_output=True, text=True, timeout=10)
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn('nsim update --project', missing.stderr)
+        self.assertEqual(list(self.out.iterdir()), [])
+        environment.update(NSIM_OUTPUT_ROOT=str(self.out), NSIM_EVENT_ROOT=str(self.events))
+        result = subprocess.run(args, env=environment, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        journal = Path(json.loads(result.stdout)['journal'])
+        self.assertEqual(journal, self.out / 'base' / 'rtl' / 'sim_dir' / 'smoke_42')
+        self.assertFalse((journal / 'live.json').exists())
+        self.assertFalse((journal / 'report.html').exists())
+        self.assertFalse((self.out / 'regr_dir').exists())
+        self.assertFalse(self.events.exists())
+        self.assertEqual(json.loads((journal / 'run.json').read_text())['plan']['policy']['output_roots'], [str(self.out)])
+
     def test_toml_yaml_and_discovery(self):
         self.assertEqual(load_project(self.project).name, "demo")
         self.assertEqual(len(discover([self.base])), 1)
@@ -109,17 +129,17 @@ class ConfigurationTests(Fixture):
 
     def test_output_inside_project_rejected(self):
         with self.assertRaises(ConfigError):
-            run(self.plan(), [self.project / "output"], self.events)
-        self.assertEqual(list(self.events.iterdir()), [])
+            run(self.plan(), [self.project / "output"])
+        self.assertEqual(list(self.out.iterdir()), [])
 
-    def test_nested_event_and_output_rejected(self):
+    def test_nested_output_roots_rejected(self):
         with self.assertRaises(ConfigError):
-            run(self.plan(), [self.out], self.out / "events")
+            run(self.plan(), [self.out, self.out / 'nested'])
 
     def test_dry_run_records_plan_without_starting_process(self):
         plan = self.plan()
         with patch("nsim.runner.subprocess.Popen") as process:
-            journal, state = run(plan, [self.out], self.events, dry_run=True)
+            journal, state = run(plan, [self.out], dry_run=True)
         process.assert_not_called()
         self.assertTrue(state["dry_run"])
         self.assertTrue((journal / "plan.json").exists())
@@ -131,26 +151,25 @@ class RegressionTests(Fixture):
         self.cases.write_text("slow\n")
         self.data["fake"] = {"durations": {"slow": 10}}
         self.save_submit()
-        process = subprocess.Popen([sys.executable, "-m", "nsim", "run", "regression",
+        process = subprocess.Popen([sys.executable, "-m", "nsim", "run",
                                     "--project", str(self.project), "--caselist", str(self.cases),
-                                    "--submit", str(self.submit), "--output-root", str(self.out),
-                                    "--event-root", str(self.events)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                    "--submit", str(self.submit), "--output-root", str(self.out)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             deadline = time.monotonic() + 5
             live = None
             while time.monotonic() < deadline:
-                files = list(self.events.rglob("live.json"))
+                files = list(self.out.rglob("live.json"))
                 if files:
                     live = json.loads(files[0].read_text())
-                    if live["tasks"][0]["status"] == "running" and list(self.out.rglob("run.log")):
+                    if live["totals"]["running"] == 1 and list(self.out.rglob("run.log")):
                         break
                 time.sleep(.02)
             self.assertIsNotNone(live)
-            self.assertEqual(live["tasks"][0]["status"], "running")
+            self.assertEqual(live["totals"]["running"], 1)
             os.kill(process.pid, signal.SIGINT)
             _, stderr = process.communicate(timeout=5)
             self.assertEqual(process.returncode, 130, stderr)
-            self.assertEqual(list(self.events.rglob("final.json")), [])
+            self.assertEqual(list(self.out.rglob("final.json")), [])
         finally:
             if process.poll() is None:
                 process.kill()
@@ -160,7 +179,7 @@ class RegressionTests(Fixture):
         second = self.project / "second.json"
         write_json(second, dict(self.data, name="other"))
         plan = create_plan(self.project, caselist=self.cases, submit_paths=[self.submit, second], seeds=[42, 43])
-        journal, state = run(plan, [self.out], self.events, jobs=3)
+        journal, state = run(plan, [self.out], jobs=3)
         self.assertTrue(state["passed"], state)
         self.assertEqual(len(state["tasks"]), 12)
         paths = [t["attempts"][-1]["result"] for t in state["tasks"]]
@@ -272,10 +291,10 @@ class RegressionTests(Fixture):
             replay(journal)
 
     def test_cli_executes_from_arbitrary_working_directory(self):
-        completed = subprocess.run([sys.executable, "-m", "nsim", "run", "regression",
+        completed = subprocess.run([sys.executable, "-m", "nsim", "run",
                                     "--project", str(self.project), "--caselist", str(self.cases),
                                     "--submit", str(self.submit), "--seed", "17", "--jobs", "2",
-                                    "--output-root", str(self.out), "--event-root", str(self.events)],
+                                    "--output-root", str(self.out)],
                                    cwd=self.base, capture_output=True, text=True, timeout=10)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         data = json.loads(completed.stdout)
@@ -286,11 +305,10 @@ class RegressionTests(Fixture):
 class StorageRecoveryTests(Fixture):
     def test_missing_mount_is_not_recreated(self):
         missing = self.base / "missing-mount"
-        journal, state = run(self.plan(), [missing], self.events)
-        self.assertFalse(state["passed"])
+        with self.assertRaisesRegex(OSError, 'no healthy output root'):
+            run(self.plan(), [missing])
         self.assertFalse(missing.exists())
-        self.assertTrue((journal / "final.json").exists())
-        self.assertIn(str(missing), state["quarantined"])
+        self.assertEqual(list(self.out.iterdir()), [])
 
     def test_space_inode_and_quota_failures(self):
         from types import SimpleNamespace
@@ -319,7 +337,7 @@ class StorageRecoveryTests(Fixture):
                 raise OSError(errno.EIO, "injected disk failure")
             return preflight(root, *args)
         with patch("nsim.runner.preflight", side_effect=probe):
-            journal, state = run(self.plan(), [self.out, self.backup], self.events, retries=1)
+            journal, state = run(self.plan(), [self.out, self.backup], retries=1)
         self.assertTrue(state["passed"], state)
         attempts = state["tasks"][0]["attempts"]
         self.assertEqual([a["verdict"] for a in attempts], ["INFRA_ERROR", "PASS"])
@@ -329,9 +347,9 @@ class StorageRecoveryTests(Fixture):
         self.assertTrue(load_final(journal)[1]["passed"])
 
     def test_retry_limit_prevents_automatic_failover(self):
-        missing = self.base / "offline"
         self.cases.write_text("smoke\n")
-        journal, state = run(self.plan(), [missing, self.backup], self.events, retries=0)
+        with patch('nsim.runner.preflight', side_effect=OSError(errno.EIO, 'runtime failure')):
+            journal, state = run(self.plan(), [self.out, self.backup], retries=0)
         self.assertFalse(state["passed"])
         self.assertEqual(len(state["tasks"][0]["attempts"]), 1)
         _, recovered = replay(journal, roots=[self.backup], recovery=True)
@@ -339,7 +357,8 @@ class StorageRecoveryTests(Fixture):
 
     def test_zero_retry_budget_is_bounded(self):
         self.cases.write_text("smoke\n")
-        _, state = run(self.plan(), [self.base / "offline", self.backup], self.events, retries=10, retry_seconds=0)
+        with patch('nsim.runner.preflight', side_effect=OSError(errno.EIO, 'runtime failure')):
+            _, state = run(self.plan(), [self.out, self.backup], retries=10, retry_seconds=0)
         self.assertEqual(len(state["tasks"][0]["attempts"]), 1)
 
     def test_atomic_write_keeps_old_file_on_replace_failure(self):
@@ -351,17 +370,17 @@ class StorageRecoveryTests(Fixture):
         self.assertEqual(target.read_bytes(), b"old")
         self.assertEqual(list(self.out.iterdir()), [target])
 
-    def test_independent_event_failure_never_publishes_final(self):
+    def test_output_record_failure_never_publishes_final(self):
         from nsim import service
         original = service.write_json
         def fail_attempt(path, value):
-            if path.parent.name == "attempts":
-                raise OSError(errno.ENOSPC, "event storage full")
+            if path.name == 'run.json' and value.get('lifecycle') == 'attempt_complete':
+                raise OSError(errno.ENOSPC, "output record storage full")
             return original(path, value)
-        with patch("nsim.service.write_json", side_effect=fail_attempt):
+        with patch("nsim.service.write_json", side_effect=fail_attempt), patch("nsim.runner.write_json", side_effect=fail_attempt):
             with self.assertRaises(OSError):
                 self.launch(jobs=2)
-        self.assertEqual(list(self.events.rglob("final.json")), [])
+        self.assertEqual(list(self.out.rglob("final.json")), [])
 
     def test_final_report_write_failure_never_claims_pass(self):
         from nsim import service
@@ -387,7 +406,7 @@ class StorageRecoveryTests(Fixture):
                 raise OSError(errno.EIO, "disk stopped accepting writes")
             return original(path, value)
         with patch("nsim.runner.write_json", side_effect=fail_metadata):
-            _, state = run(self.plan(), [self.out, self.backup], self.events, jobs=1)
+            _, state = run(self.plan(), [self.out, self.backup], jobs=1)
         self.assertTrue(state["passed"])
         self.assertEqual([a["verdict"] for a in state["tasks"][0]["attempts"]], ["INFRA_ERROR", "PASS"])
 
@@ -430,9 +449,9 @@ print(" ".join(sys.argv[4:]))
         self.save_submit()
         with self.assertRaises(ConfigError):
             self.launch()
-        self.assertEqual(list(self.events.iterdir()), [])
+        self.assertEqual(list(self.out.iterdir()), [])
 
-    def test_input_mutated_by_wrapper_is_not_pass(self):
+    def test_wrapper_source_write_is_blocked_before_mutation(self):
         self.make_command('''import json,sys
 from pathlib import Path
 Path(__file__).with_name("input.txt").write_text("mutated")
@@ -441,8 +460,11 @@ Path(sys.argv[3]).write_text(json.dumps({"schema_version":1,"case":sys.argv[1],"
 ''')
         self.cases.write_text("smoke\n")
         _, state = self.launch()
-        self.assertEqual(state["tasks"][0]["effective_verdict"], "INPUT_CHANGED")
+        self.assertEqual(state["tasks"][0]["effective_verdict"], "CRASH")
         self.assertFalse(state["passed"])
+        self.assertEqual((self.project / 'input.txt').read_text(), 'stable input\n')
+        work = Path(state['tasks'][0]['attempts'][0]['cwd'])
+        self.assertFalse((work / 'result.json').exists())
 
 
 class ResultContractTests(unittest.TestCase):

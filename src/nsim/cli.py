@@ -8,79 +8,159 @@ import sys
 from typing import Optional, Sequence
 
 from nsim import get_version
-from nsim.config import ConfigError, discover, load_project
+from nsim.cli_aliases import add_argument, add_command
+from nsim.config import MODES, ConfigError, discover, load_project
 from nsim.planning import create_plan
 from nsim.reports import load_final, markdown
 from nsim.service import replay, run
 from nsim.storage import IntegrityError, preflight
+from nsim.lsf import LsfError
 from nsim.project_paths import ProjectError, resolve_root
 from nsim import projects as project_admin
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParser:
+    parser = parser_class(
         prog="nsim", description="Traceable ASIC simulation regression orchestration."
     )
-    parser.add_argument("--version", action="version", version="%(prog)s " + get_version())
+    add_argument(parser, "--version", action="version", version="%(prog)s " + get_version())
+    add_argument(parser, '-o', '--output-root', dest='global_output_root', action='append', type=Path,
+                        help='Override output roots for com/sim/run/regr/rerun/recover')
     commands = parser.add_subparsers(dest="command")
     project_admin.add_commands(commands)
-    capabilities = commands.add_parser('capabilities', help='supported project schemas')
-    capabilities.add_argument('--json', action='store_true')
-    info = commands.add_parser("version", help="Show the tool version for provenance records")
-    info.add_argument("--json", action="store_true", help="Emit machine-readable tool identity")
-    project = commands.add_parser("project", help="Discover or inspect project descriptors")
+    from nsim.submit_commands import add_commands
+    add_commands(commands)
+    capabilities = add_command(commands, 'capabilities', help='supported project schemas')
+    add_argument(capabilities, '--json', action='store_true')
+    info = add_command(commands, "version", help="Show the tool version for provenance records")
+    add_argument(info, "--json", action="store_true", help="Emit machine-readable tool identity")
+    project = add_command(commands, "project", help="Discover or inspect project descriptors")
     project_commands = project.add_subparsers(dest="action", required=True)
-    listing = project_commands.add_parser("list")
-    listing.add_argument("roots", nargs="+", type=Path)
-    inspect = project_commands.add_parser("inspect")
-    inspect.add_argument("path", type=Path)
-    launch = commands.add_parser("run", help="Plan and execute a local regression")
-    launch_commands = launch.add_subparsers(dest="action", required=True)
-    for action in ("case", "regression"):
-        execute = launch_commands.add_parser(action)
-        execute.add_argument("--project", type=Path, required=True)
-        execute.add_argument("--case" if action == "case" else "--caselist", required=True)
-        execute.add_argument("--submit", action="append", type=Path, required=True)
-        execute.add_argument("--seed", action="append", type=int)
-        execute.add_argument("--output-root", action="append", type=Path,
-                             help="Existing output root; repeat to configure fallback storage")
-        execute.add_argument("--event-root", type=Path, help="Existing independent control journal directory")
-        execute.add_argument("--jobs", type=int, default=1)
-        execute.add_argument("--retries", type=int, default=1)
-        execute.add_argument("--retry-seconds", type=float, default=120)
-        execute.add_argument("--min-free-bytes", type=int, default=0)
-        execute.add_argument("--min-free-inodes", type=int, default=0)
-        execute.add_argument("--dry-run", action="store_true")
-        execute.add_argument("--scheduler", choices=["local", "lsf"])
-        execute.add_argument("--queue")
-        execute.add_argument("--resource", action="append")
-        execute.add_argument("--license", action="append", help="LSF resource=count; CLI replaces submit licenses")
+    listing = add_command(project_commands, "list")
+    add_argument(listing, "roots", nargs="+", type=Path)
+    inspect = add_command(project_commands, "inspect")
+    add_argument(inspect, "path", type=Path)
+    for stage, description in (('com', 'Compile only'), ('sim', 'Simulate using existing compile products'),
+                               ('run', 'Compile, simulate and check results'),
+                               ('regr', 'Compile and run one or more regression case lists')):
+        execute = add_command(commands, stage, help=description)
+        add_argument(execute, "--project", type=Path, help='Project name/path; default: discover from current directory')
+        if stage != 'com':
+            selection = execute.add_mutually_exclusive_group(required=True)
+            if stage != 'regr':
+                add_argument(selection, '--case')
+            add_argument(selection, '-l', '--caselist', action='extend', nargs='+', type=Path)
+            if stage == 'regr':
+                add_argument(selection, '-rl', '--regr-list', type=Path, help='Batch list: one regr argument list per line')
+            add_argument(execute, '--plusargs', action='extend', nargs='+', default=[],
+                                 help='Final runtime +KEY overrides, shared with regression-list rows')
+            seeds = execute.add_mutually_exclusive_group()
+            add_argument(seeds, '-seed', '--seed', action='extend', nargs='+', type=int)
+            if stage == 'regr':
+                add_argument(seeds, '-repeat', type=int, help='Generate N distinct random seeds; exclusive with -seed')
+        add_argument(execute, '-sub', '--submit', action='extend', nargs='+', type=Path, required=stage != 'regr',
+                             help='Submit names under project/submit, or explicit JSON paths')
+        add_argument(execute, '-mode', choices=MODES, help='Default: infer from submits; an explicit mode must match')
+        add_argument(execute, '-dir', help='Workspace name (default: selected mode)')
+        add_argument(execute, '-com-dir', default='com_dir', help='Compile path relative to workspace, or absolute path')
+        add_argument(execute, '-sim-dir', default='sim_dir', help='Simulation parent relative to workspace, or absolute path')
+        add_argument(execute, '-o', "--output-root", action="append", type=Path,
+                             help="Override project output roots; repeat to configure fallback storage")
+        add_argument(execute, '-j', '-jobs', "--jobs", type=int, default=1,
+                             help='Maximum unfinished jobs across this invocation (default: 1)')
+        add_argument(execute, "--retries", type=int, default=1)
+        add_argument(execute, "--retry-seconds", type=float, default=120)
+        add_argument(execute, "--min-free-bytes", type=int, default=0)
+        add_argument(execute, "--min-free-inodes", type=int, default=0)
+        add_argument(execute, "--dry-run", action="store_true")
+        add_argument(execute, '-scheduler', "--scheduler", choices=["local", "lsf"],
+                             help='Override submit scheduler (default: lsf)')
+        add_argument(execute, '-q', '-queue', "--queue")
+        add_argument(execute, "--resource", action="append")
+        add_argument(execute, "--license", action="append", help="LSF resource=count; CLI replaces submit licenses")
     for action in ("rerun", "recover"):
-        again = commands.add_parser(action, help="Replay terminal failures" if action == "rerun" else "Recover terminal storage/evidence failures")
-        again.add_argument("source", type=Path, help="Completed control journal directory")
-        again.add_argument("--output-root", action="append", type=Path)
-        again.add_argument("--event-root", type=Path)
-        again.add_argument("--seed", type=int)
-        again.add_argument("--jobs", type=int)
-        again.add_argument("--retries", type=int)
-        again.add_argument("--retry-seconds", type=float)
-    report = commands.add_parser("report", help="Validate and show terminal evidence")
+        again = add_command(commands, action, help="Replay terminal failures" if action == "rerun" else "Recover terminal storage/evidence failures")
+        add_argument(again, "source", type=Path, help="Completed simulation or regression directory")
+        add_argument(again, '-o', "--output-root", action="append", type=Path)
+        add_argument(again, '-seed', "--seed", type=int)
+        add_argument(again, "--jobs", type=int)
+        add_argument(again, "--retries", type=int)
+        add_argument(again, "--retry-seconds", type=float)
+    report = add_command(commands, "report", help="Validate and show terminal evidence")
     reports = report.add_subparsers(dest="action", required=True)
-    show = reports.add_parser("show")
-    show.add_argument("source", type=Path)
-    show.add_argument("--json", action="store_true")
-    storage = commands.add_parser("storage", help="Probe an existing storage root")
+    show = add_command(reports, "show")
+    add_argument(show, "source", type=Path)
+    add_argument(show, "--json", action="store_true")
+    storage = add_command(commands, "storage", help="Probe an existing storage root")
     probes = storage.add_subparsers(dest="action", required=True)
-    probe = probes.add_parser("check")
-    probe.add_argument("root", type=Path)
-    probe.add_argument("--min-free-bytes", type=int, default=0)
-    probe.add_argument("--min-free-inodes", type=int, default=0)
+    probe = add_command(probes, "check")
+    add_argument(probe, "root", type=Path)
+    add_argument(probe, "--min-free-bytes", type=int, default=0)
+    add_argument(probe, "--min-free-inodes", type=int, default=0)
     return parser
+
+
+def resolve_submits(root, values):
+    paths = []
+    for value in values:
+        if value.is_absolute() or len(value.parts) > 1 or value.is_file():
+            path = value.resolve()
+        else:
+            filename = value.name if value.suffix == '.json' else value.name + '.json'
+            path = (root / 'submit' / filename).resolve()
+        if not path.is_file():
+            raise ConfigError(f'submit not found: {value} (resolved to {path})')
+        if path not in paths:
+            paths.append(path)
+    return paths
+
+
+def prepare_execution(args):
+    if not args.submit:
+        raise ConfigError('one or more -sub/--submit values are required for a single regression')
+    overrides = {k: v for k, v in {'kind': args.scheduler, 'queue': args.queue, 'resources': args.resource}.items() if v is not None}
+    if args.license is not None:
+        try:
+            overrides['licenses'] = {k: int(v) for k, v in (item.split('=', 1) for item in args.license)}
+        except ValueError as exc:
+            raise ConfigError('--license requires resource=positive-integer') from exc
+    root = resolve_root(args.project)
+    plan = create_plan(root, caselist=getattr(args, "caselist", None),
+                       cases=[args.case] if getattr(args, 'case', None) else None,
+                       submit_paths=resolve_submits(root, args.submit), seeds=getattr(args, 'seed', None),
+                       allow_missing_tools=args.dry_run, scheduler_overrides=overrides,
+                       phase=args.command, mode=args.mode, directory=args.dir,
+                       com_dir=args.com_dir, sim_dir=args.sim_dir, repeat=getattr(args, 'repeat', None),
+                       plusargs=getattr(args, 'plusargs', []))
+    defaults = plan['project'].get('storage_defaults', {})
+    roots = args.output_root or args.global_output_root or defaults.get('output_roots') or (
+        [os.environ['NSIM_OUTPUT_ROOT']] if os.environ.get('NSIM_OUTPUT_ROOT') else None)
+    if not roots:
+        raise ConfigError('provide --output-root, or save project defaults with '
+                          'nsim update --project NAME --output-root PATH')
+    from nsim.config import integer, number
+    integer(args.jobs, 'jobs', 1)
+    integer(args.retries, 'retries')
+    number(args.retry_seconds, 'retry_seconds')
+    integer(args.min_free_bytes, 'min_free_bytes')
+    integer(args.min_free_inodes, 'min_free_inodes')
+    from nsim.service import validate_roots
+    from nsim.layout import validate_layout
+    roots = validate_roots(plan, roots)
+    validate_layout(plan, roots)
+    if not args.dry_run and any(s['adapter'] == 'vcs' for s in plan['submits']):
+        raise ConfigError('native VCS execution is not yet enabled; use --dry-run')
+    settings = dict(jobs=args.jobs, retries=args.retries, retry_seconds=args.retry_seconds,
+                    min_free_bytes=args.min_free_bytes, min_free_inodes=args.min_free_inodes, dry_run=args.dry_run)
+    return plan, roots, settings
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    execution_commands = ('com', 'sim', 'run', 'regr', 'rerun', 'recover')
+    if args.global_output_root and args.command not in execution_commands:
+        parser.error('-o before the command applies only to execution or replay commands')
     if args.command == 'capabilities':
         print(json.dumps({'version': get_version(), 'project_schemas': [1, 2]}))
         return 0
@@ -89,6 +169,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(json.dumps(identity, sort_keys=True) if args.json else "nsim " + identity["version"])
         return 0
     try:
+        if args.command == 'submit':
+            from nsim.submit_commands import dispatch
+            return dispatch(args)
         if args.command in ('bootstrap', 'list', 'status', 'update', 'switch'):
             return project_admin.dispatch(args)
         if args.command == "project":
@@ -103,37 +186,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             _, state = load_final(args.source)
             print(json.dumps(state, indent=2) if args.json else markdown(state))
             return 0 if state["passed"] else 1
-        if args.command == "run":
-            roots = args.output_root or ([Path(os.environ["NSIM_OUTPUT_ROOT"])] if "NSIM_OUTPUT_ROOT" in os.environ else None)
-            events = args.event_root or os.environ.get("NSIM_EVENT_ROOT")
-            if not roots or not events:
-                raise ConfigError("provide --output-root and --event-root (or NSIM_OUTPUT_ROOT / NSIM_EVENT_ROOT)")
-            overrides = {k: v for k, v in {'kind': args.scheduler, 'queue': args.queue, 'resources': args.resource}.items() if v is not None}
-            if args.license is not None:
-                try:
-                    overrides['licenses'] = {k: int(v) for k, v in (item.split('=', 1) for item in args.license)}
-                except ValueError as exc:
-                    raise ConfigError('--license requires resource=positive-integer') from exc
-            plan = create_plan(resolve_root(args.project), caselist=getattr(args, "caselist", None),
-                               cases=[args.case] if args.action == "case" else None,
-                               submit_paths=args.submit, seeds=args.seed, allow_missing_tools=args.dry_run, scheduler_overrides=overrides)
-            journal, state = run(plan, roots, events, jobs=args.jobs, retries=args.retries,
-                                 retry_seconds=args.retry_seconds, min_free_bytes=args.min_free_bytes,
-                                 min_free_inodes=args.min_free_inodes, dry_run=args.dry_run)
+        if args.command in ('com', 'sim', 'run', 'regr'):
+            if getattr(args, 'regr_list', None):
+                from nsim.batch import run_batch, prepare_batch, validate_outer
+                validate_outer(list(argv) if argv is not None else sys.argv[1:])
+                batch, entries = prepare_batch(args)
+                journal, state = run_batch(batch, entries)
+            else:
+                plan, roots, settings = prepare_execution(args)
+                journal, state = run(plan, roots, **settings)
         elif args.command in ("rerun", "recover"):
-            journal, state = replay(args.source, roots=args.output_root, events=args.event_root,
+            journal, state = replay(args.source, roots=args.output_root or args.global_output_root,
                                     recovery=args.command == "recover", seed=args.seed, jobs=args.jobs,
                                     retries=args.retries, retry_seconds=args.retry_seconds)
         else:
             parser.print_help()
             return 0
-        print(json.dumps({"journal": str(journal) if journal else None,
-                          "passed": state["passed"], "tasks": len(state["tasks"]),
+        print(json.dumps({"record_dir": str(journal) if journal else None,
+                          'phase': state.get('phase', args.command),
+                          "journal": str(journal) if journal else None,
+                          "passed": state["passed"], "tasks": state.get("task_count", len(state.get("tasks", []))),
                           "dry_run": state.get("dry_run", False), "message": state.get("message")}, indent=2))
         if state.get("dry_run"):
             return 0
-        return 0 if state["passed"] else 2 if state.get("report_errors") else 1
-    except (OSError, ConfigError, ProjectError, IntegrityError, UnicodeError) as exc:
+        return 0 if state["passed"] else 2 if state.get("report_errors") or state.get('scheduler_errors') else 1
+    except (OSError, ConfigError, ProjectError, IntegrityError, UnicodeError, LsfError) as exc:
         print(f"nsim: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:

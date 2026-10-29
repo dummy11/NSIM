@@ -1,6 +1,6 @@
 """Strict project/submit loading, independent of execution."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import math
 from pathlib import Path
@@ -16,6 +16,9 @@ if sys.version_info >= (3, 11):
     import tomllib
 else:
     import tomli as tomllib
+
+
+MODES = ('rtl', 'gate', 'fpga', 'haps', 'zebu', 'palladium')
 
 
 class ConfigError(ValueError):
@@ -43,9 +46,11 @@ def yaml_mapping(loader, node):
 StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, yaml_mapping)
 
 
-def read_json(path: Path):
+def read_json(path: Path, content=None):
     try:
-        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_pairs,
+        if isinstance(content, bytes):
+            content = content.decode('utf-8')
+        return json.loads(path.read_text(encoding="utf-8") if content is None else content, object_pairs_hook=unique_pairs,
                           parse_constant=lambda value: _invalid(f"invalid number: {value}"))
     except (ValueError, UnicodeError) as exc:
         raise ConfigError(f"{path}: {exc}") from exc
@@ -100,6 +105,7 @@ class Project:
     rtl_root: Optional[Path] = None
     rtl_filelist: Optional[Path] = None
     verification_filelist: Optional[Path] = None
+    output_roots: List[Path] = field(default_factory=list)
 
     @property
     def root(self):
@@ -124,7 +130,8 @@ def load_project(path: Path, validate=True) -> Project:
         raise ConfigError('project: expected an object')
     schema = integer(data.get('schema_version'), 'schema_version')
     if schema == 2:
-        fields(data, {'schema_version', 'name', 'inputs', 'rtl_root', 'rtl_filelist', 'verification_filelist'},
+        fields(data, {'schema_version', 'name', 'inputs', 'rtl_root', 'rtl_filelist', 'verification_filelist',
+                      'output_roots', 'event_root'},
                {'schema_version', 'name', 'rtl_root', 'rtl_filelist', 'verification_filelist'}, 'project')
         if path.parent.name != '.nsim' or path.name != 'nsim.toml':
             raise ConfigError('schema 2 requires verification/.nsim/nsim.toml')
@@ -137,6 +144,13 @@ def load_project(path: Path, validate=True) -> Project:
                 raise ConfigError(f'{key}: expected a path string')
             resolved[key] = (root / data[key]).resolve()
         paths = [(root / p).resolve() for p in strings(data.get('inputs', []), 'inputs')]
+        if 'output_roots' in data:
+            resolved['output_roots'] = [(root / p).resolve() for p in
+                                        strings(data['output_roots'], 'output_roots', nonempty=True)]
+        # Read the previous candidate's field for migration only. It is never
+        # used and the next explicit project update omits it from the descriptor.
+        if 'event_root' in data and (not isinstance(data['event_root'], str) or not data['event_root'] or '\0' in data['event_root']):
+            raise ConfigError('legacy event_root: expected a path string; remove this obsolete field')
         if validate:
             if not resolved['rtl_root'].is_dir():
                 raise ConfigError(f"rtl_root is not a directory: {resolved['rtl_root']}")
@@ -173,37 +187,54 @@ def discover(roots: List[Path]) -> List[Project]:
 
 
 def load_cases(path: Path) -> List[str]:
-    cases = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        value = line.partition("#")[0].strip()
-        if value:
-            name(value, "case")
-            if value not in cases:
-                cases.append(value)
-    if not cases:
-        raise ConfigError(f"empty caselist: {path}")
-    return cases
+    from nsim.caselist import load_caselist
+    return list(dict.fromkeys(record['case'] for record in load_caselist(path)))
 
 
-def load_submit(path: Path) -> Dict[str, Any]:
-    data = read_json(path)
-    fields(data, {"schema_version", "name", "adapter", "argv", "env", "plusargs", "required_checks",
-                  "timeout_seconds", "settle_seconds", "fake", "vcs", "scheduler"},
+def load_submit(path: Path, source_bytes=None, *, file_contents=None) -> Dict[str, Any]:
+    from nsim.submit_config import SUBMIT_FIELDS, resolve_submit
+    data = resolve_submit(Path(path), source_bytes, file_contents=file_contents)
+    fields(data, SUBMIT_FIELDS - {'extends'},
            {"schema_version", "name", "adapter"}, "submit")
     if integer(data["schema_version"], "schema_version") != 1:
         raise ConfigError("unsupported submit schema version")
     name(data["name"], "submit name")
+    if data['name'].casefold() in {'regr_dir', 'regr_batch_dir'}:
+        raise ConfigError('submit name is reserved for regression records: ' + data['name'])
     if data["adapter"] not in ("fake", "command", "vcs"):
         raise ConfigError("supported adapters: fake, command, vcs")
+    mode = data.get('mode', 'rtl')
+    if mode not in MODES:
+        raise ConfigError('submit mode must be one of: ' + ', '.join(MODES))
+    compilation = data.get('compile')
+    if compilation is not None:
+        if data['adapter'] != 'command':
+            raise ConfigError('compile settings require the command adapter')
+        fields(compilation, {'argv', 'artifacts', 'timeout_seconds'}, {'argv', 'artifacts'}, 'compile')
+        compilation = dict(compilation, argv=strings(compilation['argv'], 'compile.argv', True),
+                           artifacts=strings(compilation['artifacts'], 'compile.artifacts', True),
+                           timeout_seconds=number(compilation.get('timeout_seconds', 600), 'compile.timeout_seconds', .01))
+        for artifact in compilation['artifacts']:
+            value = Path(artifact)
+            if (value.is_absolute() or '..' in value.parts or not value.parts
+                    or value.parts[0].casefold() == 'env'
+                    or value.parts[0].startswith('.') or value.parts[0] in
+                    {'build.json', 'compile.log', 'compile.err', 'vcs.log', 'log_analysis.json', 'analysis.json', 'hooks', 'hooks.json',
+                     'plan.json', 'state.json', 'final.json', 'records', 'controller.lock'}):
+                raise ConfigError(f'compile artifact must be a relative product path: {artifact}')
     argv = strings(data.get("argv", []), "argv")
-    if (data["adapter"] == "command") != bool(argv):
-        raise ConfigError("only command adapter requires argv")
+    if data['adapter'] == 'command' and not argv:
+        raise ConfigError('command adapter requires non-empty argv; configure it in this submit or its common template')
+    if data['adapter'] != 'command' and argv:
+        raise ConfigError('argv is only supported by the command adapter')
     checks = strings(data.get("required_checks", ["functional", "golden"]), "required_checks", True)
     if len(set(checks)) != len(checks):
         raise ConfigError("duplicate required checks")
     for check in checks:
         name(check, "check")
     plusargs = strings(data.get("plusargs", []), "plusargs")
+    from nsim.caselist import layer
+    case_defaults = layer(data.get('case_defaults', {}), 'submit.case_defaults')
     env = data.get("env", {})
     if not isinstance(env, dict) or any(not isinstance(k, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k)
                                       or not isinstance(v, str) or "\0" in v for k, v in env.items()):
@@ -225,9 +256,13 @@ def load_submit(path: Path) -> Dict[str, Any]:
             elif value not in ("pass", "fail", "no_compare", "missing", "malformed", "crash", "performance_fail"):
                 raise ConfigError(f"unknown fake outcome: {value}")
     from nsim.eda_config import scheduler_config, vcs_config
-    result = dict(data, required_checks=checks, argv=argv, plusargs=plusargs, env=env,
+    from nsim.hooks import config as hooks_config
+    from nsim.log_analysis import config as analysis_config
+    result = dict(data, mode=mode, compile=compilation, required_checks=checks, argv=argv, plusargs=plusargs, env=env,
+                  case_defaults=case_defaults,
                   timeout_seconds=timeout, settle_seconds=settle, fake=fake,
-                  scheduler=scheduler_config(data.get("scheduler", {})))
+                  scheduler=scheduler_config(data.get("scheduler", {})), hooks=hooks_config(data.get('hooks', {})),
+                  log_analysis=analysis_config(data.get('log_analysis', {})))
     if data["adapter"] == "vcs":
         result["vcs"] = vcs_config(data.get("vcs", {}))
         if "golden" in checks and not result["vcs"]["golden_enabled"]:

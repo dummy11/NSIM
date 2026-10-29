@@ -43,7 +43,9 @@ def atomic_write(path: Path, data: bytes):
 
 
 def write_json(path: Path, value):
-    atomic_write(path, encode(value))
+    data = encode(value)
+    atomic_write(path, data)
+    return hashlib.sha256(data).hexdigest()
 
 
 def preflight(root: Path, min_free_bytes=0, min_free_inodes=0):

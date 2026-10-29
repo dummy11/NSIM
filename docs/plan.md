@@ -1,4 +1,4 @@
-# nsim 项目规划
+# NSIM 开发规划
 
 ## 目标
 
@@ -8,11 +8,11 @@
 - ASIC 工程仓库及其本地元数据
 - 生成的仿真输出，例如 build、log、wave 和 report
 
-首个可运行版本的开发目标是建立一个小而可执行的基础系统：能够发现工程、识别版本、加载 case 和 submit 定义，并运行一次可追溯的本地回归。VCS、Verdi、DPI、FSDB、多进程和 LSF 支持在工程模型稳定后按功能逐步加入。
+当前候选实现已具备项目注册、版本选择、submit 继承、编译/仿真分离、local/LSF 调度、日志分析和终端进度。原生 VCS、Verdi、DPI、FSDB 集成仍停留在命令预览；工程可以通过 command 包装器执行实际编译与仿真。下文区分已确定接口与后续目标，验证范围见 [实现状态](implementation_status.md)，后续任务见 [待办](backlog.md)。
 
 ## 产品范围
 
-### 范围内
+### 产品目标范围（包含后续工作）
 
 - 使用 `pyproject.toml` 管理 Python 包
 - CLI 命令名为 `nsim`
@@ -53,22 +53,21 @@
 - 真实 EDA 工具相关测试需要通过环境门控运行，普通 CI 不假设存在 VCS、Verdi 或 LSF。
 - regression 可追溯性优先依赖文件快照、hash 和机器可读 metadata，而不是人工命名约定。
 
-## 开放问题（Open Questions）
+## 已确定的接口
 
-- 工程描述文件的文件名和格式是否固定为 `nsim.yaml`、`nsim.toml`，还是允许多种格式？
-- caselist 采用纯文本、YAML、TOML、JSON，还是兼容已有工程格式？
-- submit JSON 的 schema 由 `nsim` 强约束，还是允许工程扩展自定义字段？
-- ASIC 工程 tag 如何定义：优先使用 git tag、commit SHA，还是允许用户传入工程自定义版本号？
-- output root 的默认位置应来自用户配置、环境变量，还是当前工作目录下的默认目录？
-- VCS compile 是否按 submit 独立执行，还是支持多个 simulation submit 共享同一个 compile artifact？
-- FSDB dump 由 submit JSON 直接控制，还是由 testcase、testbench 或运行时 plusarg 共同决定？
-- DPI 编译产物是否按工程共享，还是按 regression/run 隔离生成？
-- LSF 队列、资源和 license 约束应建模在 submit JSON 中，还是独立为 scheduler profile？
-- regression metadata 的长期存储先保持文件形式，还是需要预留后续数据库索引接口？
+| 领域 | 当前约定 |
+| --- | --- |
+| 工程配置 | 新项目使用 `.nsim/nsim.toml` schema 2；兼容读取根目录 schema 1 TOML/YAML。版本单独保存在 `.nsim/.nsim_version`。 |
+| Caselist | 纯文本，每行一个 case，支持注释、多清单合并及来源追踪。 |
+| Submit | 严格 JSON schema 1；支持一个父模板、一层继承，合并后校验。扩展命令通过 argv、env 和 hooks 配置。 |
+| 输入身份 | 保存 verification/RTL 各自 Git 身份，以及声明输入、配置和工具的内容哈希；Git tag 不替代文件校验。 |
+| 输出根 | 命令行覆盖项目默认值，再回退兼容变量 `NSIM_OUTPUT_ROOT`；输出根须预先存在。 |
+| 编译复用 | 同一 submit/输出根在一次 run/regr 内共享编译；sim 显式复用兼容产物，不自动补编译。不同 submit 独立编译。 |
+| FSDB / DPI | FSDB 由配置与 plusargs 配合；DPI 提供 project/regression/run 范围的命令预览，实际工具验收待完成。 |
+| 调度 | 默认 LSF，可切 local；队列、资源与 license 在 submit 中配置，CLI 可覆盖。每次调用共用一个并发窗口。 |
+| 记录与报告 | 文件化 plan、attempt records、state、final；回归另有终端 Dashboard、有界 live.json 和最终静态报告。 |
 
-
-
-
+后续需要真实环境确定原生 EDA 的执行细节、共享文件系统保障及长期归档策略；不将这些待验收内容作为现有能力承诺。
 
 ## 核心概念
 
@@ -82,7 +81,7 @@ ASIC 工程是一个独立版本管理的仓库或目录树，包含源文件和
 
 ### 输出根目录
 
-仿真输出默认位于 `nsim` 包和 ASIC 源码树之外。每次运行都有独立输出目录，包含 build 产物、log、wave、report 和机器可读元数据。
+仿真输出默认位于 `nsim` 包和 ASIC 源码树之外。输出按 submit 分组，每个工作区内编译位于 com_dir，仿真位于 sim_dir/case_name_seed；相同 case/seed 串行覆盖旧产物。批次状态与汇总放在 regr_dir。
 
 ### Regression 记录
 
@@ -103,18 +102,18 @@ NSIM 开发仓库包含 `pyproject.toml`、`src/nsim/`、`tests/`、`examples/`�
 
 ## 配置模型
 
-平台应优先使用显式的文件化配置：
+当前使用显式文件与命令行参数组织配置：
 
-- 工程描述文件：标识 ASIC 工程及其支持的仿真根目录
-- caselist：列出 testcase 及每个 case 的属性
-- submit JSON：定义编译、仿真、波形、DPI 和调度选项
-- nsim 配置：定义输出根目录、调度默认值、保留策略和工具路径等默认项
+- 工程描述文件：标识 verification/RTL、输入清单和默认输出根
+- caselist：按行列出 testcase 名称
+- submit JSON 及公共模板：定义编译、仿真、波形、DPI、hooks 和调度选项
+- 命令行：选择执行阶段、工作区、并发与重试预算，覆盖输出根和调度设置
 
-配置应被复制或渲染到每次 regression 输出中，使结果在工程文件变化后仍可复现。
+配置原文和有效配置保存到每次计划，输入与运行时身份参与重跑校验。快照用于追溯，不能在原始依赖变化或丢失后自动重建它们；精确重跑仍要求原输入可验证。保留策略和全局配置层未实现。
 
 ## CLI 基线
 
-CLI 后续应支持：
+当前包提供以下入口。路径、队列和 submit 需要按实际工程替换；安装与版本目录命令见 [使用指南](../user_guide.md)。
 
 ```bash
 nsim --version
@@ -123,14 +122,20 @@ nsim list
 nsim status
 nsim update --rtl-root <rtl> --rtl-filelist <rtl.f>
 nsim switch <version>
-nsim case list --project <project> --caselist <file>
-nsim run case --project <project> --case <name> --submit <submit.json>
-nsim run regression --project <project> --caselist <file> --submit <submit.json> --submit <other.json>
-nsim report show <regression-id>
-nsim verdi open <run-id>
+nsim project list <search-root>
+nsim project inspect <project-path>
+nsim com --project <project> --submit <submit.json> [-mode rtl] [-dir <workspace>] [-com-dir <path>]
+nsim sim --project <project> --case <name> --submit <submit.json>
+nsim run --project <project> --case <name> --submit <submit.json>
+nsim regr --project <project> -l <file> <other-file> -sub <submit> <other-submit> -seed 42 43
+nsim regr --project <project> -l <file> -sub <submit> -repeat 10
+nsim report show <record-dir>
+nsim rerun <record-dir>
+nsim recover <record-dir> --output-root <healthy-output-root>
+nsim storage check <output-root>
 ```
 
-具体命令名称可以在 CLI 设计阶段调整，但接口必须保持显式且便于脚本调用。
+`report/rerun/recover` 接收记录目录路径，不是裸 ID。`case list`、`verdi open` 尚未作为 CLI 子命令提供；Verdi 命令目前包含在 EDA dry-run 输出中。执行参数见 [执行阶段](execution_stages.md)。
 
 ## 回归可靠性与恢复要求
 
@@ -138,18 +143,18 @@ nsim verdi open <run-id>
 
 - 测试通过必须有完整的结束证据和所需检查结果。仅正常退出、零 mismatch、未执行比较或日志缺失均不能替代有效检查；允许工程显式选择仅存活检查，但报告必须与功能通过区分。
 - 在任务规划时确定 seed，并保存 case、submit、plusargs、工程版本、工具版本、编译身份与配置快照。相同 seed 是复现条件之一，不单独保证结果完全一致。
-- 每次 regression、每组 submit、每个 case/seed 和每次 attempt 拥有独立身份与输出路径；失败重跑保留原结果，并记录来源关联。
+- regression 和 attempt 拥有独立身份；同一 submit 的 case/seed 使用固定输出路径，失败重跑覆盖旧产物并记录来源关联。批次记录保留，单跑记录随目录更新。
 - 任务按并发上限持续补位；实时进度与最终报告分离。只有完整的最终快照可以作为通过判定和失败重跑输入。
 - 允许工程提供结果解析与检查扩展，将功能、参考模型和性能检查分别记录，再按已快照的策略汇总；ACC 特定日志和性能公式不写入通用核心。
-- 回归读取确定的工程输入，编译和运行不得隐式 git pull 或清理旧回归。清理单独执行，并保护正在使用的编译产物和运行证据。
+- 回归读取确定的工程输入，编译和运行不得隐式 git pull。com/run/regr 重建选中的编译目录，sim/run/regr 在锁保护下覆盖选中的 case/seed；批次历史记录保留。面向历史输出的批量清理仍是待实现的独立功能。
 - 检测实际执行节点的路径可见性、输出可写性、可用空间、inode 及可获取的配额信息；启动前检查不能代替运行时 I/O 错误处理。
 - 挂载缺失、空间不足、配额不足、持续 I/O 错误应记录为基础设施失败，与 DUT 验证失败分开。受影响节点或存储停止接收新任务，健康资源上的无关任务可继续。
 - 瞬态存储故障与产物可见性延迟采用有上限的等待或重试。持续故障只允许在配置好的健康存储上，从可信输入创建新 attempt；无法验证输入时停止恢复。
-- 证据缺失或损坏时标记不完整，不能据此宣布通过。原子写入防止半份报告；硬盘损坏后的数据恢复依赖底层备份与冗余，NSIM 不负责修盘、修文件系统或提供存储备份服务。
+- 证据缺失或损坏时标记不完整，不能据此宣布通过。原子写入防止半份报告；硬盘损坏后的数据恢复依赖底层备份与冗余，nsim 不负责修盘、修文件系统或提供存储备份服务。
 
 ### 工程经验来源与适用边界
 
-参考工程为 `npu8860_ai/acc`，检查对象为 `sim/regress/Makefile`、`collect_results.py`、`collect_performance.py` 及其测试，故障历史见该工程 `docs/handoff.md` 与 `docs/handoff_archive.md`。这些是外部工程定位信息，不是 NSIM 的运行依赖或公开测试资产。
+参考工程为 `npu8860_ai/acc`，检查对象为 `sim/regress/Makefile`、`collect_results.py`、`collect_performance.py` 及其测试，故障历史见该工程 `docs/handoff.md` 与 `docs/handoff_archive.md`。这些是外部工程定位信息，不是 nsim 的运行依赖或公开测试资产。
 
 已有脚本体现了显式 seed、逐 case 目录、失败清单、独立重跑、滚动并发、结果检查和原子报告写入。历史记录描述了 `/space8` 在部分 LSF 节点不可见及 VCS runtime 环境差异，通过选择兼容队列解决启动故障；并使用有限重读处理 NFS 日志可见性延迟。未发现物理硬盘损坏后自动恢复的实现。
 
@@ -160,5 +165,5 @@ NSIM 将该工程作为首个真实接入候选；通用 CI 使用自建的最�
 - 将仿真器相关逻辑封装在适配器边界之后。
 - 将工程发现与执行流程分离。
 - 优先依赖机器可读的运行元数据，而不是解析人工 log。
-- 先实现本地执行，再加入 LSF 扩展。
+- 使用 local 和进程级 LSF 测试服务验证共用流程，再进行真实工具与 farm 验收。
 - 将每次 regression 视为可审计 artifact。

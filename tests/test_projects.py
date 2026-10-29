@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from nsim import get_version
-from nsim.config import load_project
+from nsim.config import ConfigError, MODES, load_project, load_submit
 from nsim.planning import create_plan, check_identity
 from nsim.project_paths import ProjectError, descriptor_path, find_root, load_registry, registry_path
 from nsim import projects
@@ -54,7 +54,8 @@ class ProjectTests(unittest.TestCase):
 
     def options(self, **kwargs):
         values = dict(name=None, verification_root=None, rtl_root=None, rtl_filelist=None,
-                      verification_filelist=None, nsim_version=None, project=None)
+                      verification_filelist=None, nsim_version=None, project=None,
+                      output_root=None)
         values.update(kwargs)
         return argparse.Namespace(**values)
 
@@ -86,6 +87,138 @@ class ProjectTests(unittest.TestCase):
         self.assertTrue(projects.status()['registered'])
         self.assertIn('empty', str(projects.status()['issues']))
         self.assertEqual(len(projects.list_projects()), 1)
+
+    def test_bootstrap_storage_defaults_resolve_from_calling_directory(self):
+        self.boot(output_root=['output', 'backup'])
+        root = self.base / 'verification'
+        project = load_project(root)
+        self.assertEqual(project.output_roots, [self.base / 'output', self.base / 'backup'])
+        self.assertIn('output_roots = ["../output", "../backup"]', project.descriptor.read_text())
+        self.assertNotIn('event_root', projects.status(root))
+        self.assertFalse((self.base / 'output').exists())
+        self.assertFalse((self.base / 'events').exists())
+        os.chdir(root / 'submit')
+        self.assertEqual(projects.bootstrap(self.options())['action'], 'already_registered')
+        before = project.descriptor.read_bytes()
+        with self.assertRaisesRegex(ProjectError, 'storage configuration differs'):
+            projects.bootstrap(self.options(output_root=['different']))
+        self.assertEqual(project.descriptor.read_bytes(), before)
+
+    def test_update_and_switch_preserve_storage_defaults(self):
+        self.boot(output_root=['output', 'backup'])
+        root = self.base / 'verification'
+        original_map = (root / 'filelist' / 'sim.f').read_bytes()
+        self.cli('update', '--project', 'verification', '--output-root', 'new-output',
+                 '--output-root', 'new-backup')
+        project = load_project(root)
+        self.assertEqual(project.output_roots, [self.base / 'new-output', self.base / 'new-backup'])
+        self.assertEqual((root / 'filelist' / 'sim.f').read_bytes(), original_map)
+        self.cli('update', '--project', 'verification', '--rtl-filelist', self.rtl / 'rtl.f')
+        self.cli('switch', get_version(), '--project', 'verification')
+        status = json.loads(self.cli('status', '--project', 'verification', '--json').stdout)
+        self.assertNotIn('event_root', status)
+        self.assertEqual(status['output_roots'], [str(self.base / p) for p in ('new-output', 'new-backup')])
+
+    def test_stable_launcher_runs_with_saved_storage_and_cli_overrides(self):
+        spec = importlib.util.spec_from_file_location('nsim_storage_installer', REPO / 'nsim-install.py')
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        installer.bootstrap(self.home)
+        launcher = self.home / 'bin' / 'nsim'
+        def launch(*args):
+            result = subprocess.run([launcher, *map(str, args)], cwd=self.base,
+                                    capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(result.stdout)
+        launch('bootstrap', '--rtl-root', self.rtl, '--rtl-filelist', self.rtl / 'rtl.f',
+               '--output-root', 'output', '--output-root', 'backup', '--json')
+        root = self.base / 'verification'
+        submit = root / 'submit' / 'fake.json'
+        submit.write_text(json.dumps({'schema_version': 1, 'name': 'fake', 'adapter': 'fake', 'scheduler': {'kind': 'local'}}))
+        cases = root / 'smoke.caselist'
+        cases.write_text('smoke\n')
+        for name in ('output', 'backup', 'override-output', 'override-backup'):
+            (self.base / name).mkdir()
+        args = ('run', '--project', 'verification', '--caselist', cases,
+                '--submit', submit, '--seed', '42')
+        # Project defaults win over stale shell values, and paths remain project-relative
+        # even though the launcher is called from outside the verification directory.
+        with patch.dict(os.environ, NSIM_OUTPUT_ROOT=str(self.base / 'stale-output'),
+                        NSIM_EVENT_ROOT=str(self.base / 'stale-events')):
+            result = launch(*args)
+            self.assertTrue(result['passed'])
+            journal = Path(result['journal'])
+            self.assertEqual(journal.parent.parent, self.base / 'output' / 'regr_dir')
+            plan = json.loads((journal / 'plan.json').read_text())
+            self.assertEqual(plan['policy']['output_roots'], [str(self.base / p) for p in ('output', 'backup')])
+            self.assertTrue(launch('report', 'show', journal, '--json')['passed'])
+            result = launch(*args, '--output-root', 'override-output', '--output-root', 'override-backup')
+            journal = Path(result['journal'])
+            plan = json.loads((journal / 'plan.json').read_text())
+            self.assertEqual(plan['policy']['output_roots'],
+                             [str(self.base / p) for p in ('override-output', 'override-backup')])
+            self.assertEqual(journal.parent.parent, self.base / 'override-output' / 'regr_dir')
+            run_dir = next((self.base / 'output' / 'regr_dir').glob('*/fake/rtl/sim_dir/*'))
+            self.assertTrue(launch('report', 'show', run_dir, '--json')['passed'])
+        self.assertFalse((self.base / 'stale-events').exists())
+
+    def test_storage_defaults_reject_invalid_config_types(self):
+        self.boot()
+        descriptor = self.base / 'verification' / '.nsim' / 'nsim.toml'
+        original = descriptor.read_text()
+        for setting in ('output_roots = "out"', 'output_roots = []', 'output_roots = [1]',
+                        'output_roots = [""]', 'event_root = 1', 'event_root = ""'):
+            with self.subTest(setting=setting):
+                descriptor.write_text(original + setting + '\n')
+                with self.assertRaises(ConfigError):
+                    load_project(descriptor)
+
+    def test_obsolete_event_root_is_ignored_and_removed_on_output_update(self):
+        self.boot(output_root=['output'])
+        root = self.base / 'verification'
+        descriptor = root / '.nsim' / 'nsim.toml'
+        descriptor.write_text(descriptor.read_text() + 'event_root = "/obsolete/events"\n')
+        self.assertNotIn('event_root', projects.status(root))
+        self.cli('update', '--project', 'verification', '--output-root', 'new-output')
+        self.assertNotIn('event_root', descriptor.read_text())
+
+    def test_saved_storage_enforces_isolation_and_existing_roots(self):
+        self.boot(output_root=['output'])
+        root = self.base / 'verification'
+        submit = root / 'submit' / 'fake.json'
+        submit.write_text(json.dumps({'schema_version': 1, 'name': 'fake', 'adapter': 'fake', 'scheduler': {'kind': 'local'}}))
+        args = ('run', '--project', 'verification', '--case', 'smoke', '--submit', submit)
+        result = self.cli(*args, success=False)
+        self.assertFalse((self.base / 'events').exists())
+        self.assertFalse((self.base / 'output').exists())
+        self.cli('update', '--project', 'verification', '--output-root', root / 'results')
+        result = self.cli(*args, success=False)
+        self.assertIn('non-nested', result.stderr)
+        self.assertFalse((root / 'results').exists())
+
+    def test_changed_storage_defaults_do_not_redirect_historical_replay(self):
+        self.boot(output_root=['output'])
+        root = self.base / 'verification'
+        submit = root / 'submit' / 'fake.json'
+        submit.write_text(json.dumps({'schema_version': 1, 'name': 'fake', 'adapter': 'fake', 'scheduler': {'kind': 'local'},
+                                     'fake': {'outcomes': {'smoke': 'fail'}}}))
+        for name in ('output',):
+            (self.base / name).mkdir()
+        result = self.cli('run', '--project', 'verification', '--case', 'smoke',
+                          '--submit', submit, '--seed', '42', success=False)
+        journal = Path(json.loads(result.stdout)['journal'])
+        original = json.loads((journal / 'run.json').read_text())['plan']
+        self.cli('update', '--project', 'verification', '--output-root', 'new-output')
+        result = self.cli('rerun', journal, success=False)
+        replay_journal = Path(json.loads(result.stdout)['journal'])
+        self.assertEqual(replay_journal, self.base / 'output' / 'fake' / 'rtl' / 'sim_dir' / 'smoke_42')
+        self.assertEqual(json.loads((replay_journal / 'run.json').read_text())['plan']['policy']['output_roots'],
+                         [str(self.base / 'output')])
+        replay_plan = json.loads((journal / 'run.json').read_text())['plan']
+        self.assertEqual(replay_plan['snapshots'], original['snapshots'])
+        self.assertEqual(replay_plan['source']['id'], original['id'])
+        self.assertFalse((self.base / 'new-output').exists())
+        self.assertFalse((self.base / 'new-events').exists())
 
     def test_latest_semantic_sort_explicit_version_and_no_implicit_upgrade(self):
         for version in ('0.9.0', '0.10.0', '1.0.0rc1'):
@@ -119,6 +252,122 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual((root / 'submit' / 'mine.json').read_text(), 'custom')
         self.boot(verification_root=root)
         self.assertEqual(len(load_registry()['projects']), 1)
+
+    def test_bootstrap_generates_mode_common_submits_and_valid_demo_preview(self):
+        self.boot()
+        root = self.base / 'verification'
+        common = root / 'submit' / 'common'
+        self.assertEqual({p.name for p in common.iterdir()}, {mode + '.json' for mode in MODES})
+        for mode in MODES:
+            raw = json.loads((common / (mode + '.json')).read_text())
+            self.assertEqual(raw['mode'], mode)
+            self.assertNotIn('name', raw)
+        demo = root / 'submit' / 'submit_demo.json'
+        self.assertEqual(load_submit(demo)['mode'], 'rtl')
+        self.assertTrue((root / 'submit' / 'submit_demo.md').is_file())
+        (root / 'tb.sv').write_text('module tb; endmodule\n')
+        (root / 'filelist' / 'tb.f').write_text('tb.sv\n')
+        output = self.base / 'output'
+        output.mkdir()
+        preview = self.cli('run', '--case', 'smoke', '-sub', 'submit_demo', '-mode', 'rtl',
+                           '-o', output, '--dry-run', cwd=root)
+        record = Path(json.loads(preview.stdout)['record_dir'])
+        plan = json.loads((record / 'plan.json').read_text())
+        self.assertEqual(plan['submits'][0]['source_chain'], [str(common / 'rtl.json'), str(demo)])
+        self.assertIn(str(common / 'rtl.json'), plan['input_hashes'])
+        self.assertFalse(json.loads((record / 'commands.json').read_text())['executed'])
+
+    def test_bootstrap_preserves_existing_common_and_demo_and_is_idempotent(self):
+        root = self.base / 'existing'
+        common = root / 'submit' / 'common'
+        common.mkdir(parents=True)
+        paths = [common / 'rtl.json', root / 'submit' / 'submit_demo.json', root / 'submit' / 'submit_demo.md']
+        for path in paths:
+            path.write_text('user owned, do not change\n')
+        self.boot(verification_root=root)
+        before = {p: p.read_bytes() for p in (root / 'submit').rglob('*') if p.is_file()}
+        self.boot(verification_root=root)
+        for path in paths:
+            self.assertEqual(path.read_text(), 'user owned, do not change\n')
+        self.assertEqual(before, {p: p.read_bytes() for p in (root / 'submit').rglob('*') if p.is_file()})
+        self.assertTrue((common / 'gate.json').is_file())
+
+    def test_bootstrap_caselist_demos_preview_and_preserve_existing_files(self):
+        root = self.base / 'verification'
+        folder = root / 'caselist'
+        folder.mkdir(parents=True)
+        keep = folder / '00_legacy.caselist'
+        keep.write_text('my_existing_test\n')
+        self.boot()
+        self.assertEqual(keep.read_text(), 'my_existing_test\n')
+        lists = sorted(folder.glob('*.caselist'))
+        self.assertEqual(len(lists), 8)
+        self.assertTrue((folder / 'case.yaml').is_file())
+        self.assertIn('seq', (folder / 'README.md').read_text())
+        (root / 'tb.sv').write_text('module tb; endmodule\n')
+        (root / 'filelist' / 'tb.f').write_text('tb.sv\n')
+        output = self.base / 'output'
+        output.mkdir()
+        preview = self.cli('regr', '-l', *lists, '-sub', 'submit_demo', '-seed', '42',
+                           '-o', output, '--dry-run', cwd=root)
+        record = Path(json.loads(preview.stdout)['record_dir'])
+        result = json.loads((record / 'commands.json').read_text())
+        self.assertFalse(result['executed'])
+        mapped = next(task for task in result['tasks'] if task['case'] == 'override_debug')
+        self.assertIn('+UVM_SEQNAME=debug_seq', mapped['simulate'])
+        self.assertIn('+STRIDE=4', mapped['simulate'])
+        before = {p: p.read_bytes() for p in folder.iterdir()}
+        self.boot()
+        self.assertEqual(before, {p: p.read_bytes() for p in folder.iterdir()})
+        (folder / '07_overrides.caselist').unlink()
+        self.boot()
+        self.assertFalse((folder / '07_overrides.caselist').exists())
+
+    def test_caselist_scaffold_failure_rolls_back_and_symlink_is_rejected(self):
+        root = self.base / 'existing'
+        root.mkdir()
+        keep = root / 'keep'
+        keep.write_text('preserve me')
+        original = projects.atomic_write
+        def fail_case(path, content):
+            if path.name == '02_seq.caselist':
+                raise OSError('injected caselist failure')
+            original(path, content)
+        with patch.object(projects, 'atomic_write', side_effect=fail_case):
+            with self.assertRaisesRegex(OSError, 'caselist failure'):
+                self.boot(verification_root=root)
+        self.assertEqual(list(root.iterdir()), [keep])
+        self.assertEqual(load_registry()['projects'], [])
+        outside = self.base / 'outside'
+        outside.mkdir()
+        (root / 'caselist').symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(ProjectError):
+            self.boot(verification_root=root)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_submit_scaffold_failure_rolls_back_and_rejects_symlink_common(self):
+        root = self.base / 'existing'
+        root.mkdir()
+        keep = root / 'keep'
+        keep.write_text('user file')
+        original = projects.atomic_write
+        def fail_demo(path, content):
+            if path.name == 'submit_demo.md':
+                raise OSError('injected demo failure')
+            original(path, content)
+        with patch.object(projects, 'atomic_write', side_effect=fail_demo):
+            with self.assertRaisesRegex(OSError, 'demo failure'):
+                self.boot(verification_root=root)
+        self.assertEqual(list(root.iterdir()), [keep])
+        self.assertEqual(load_registry()['projects'], [])
+        (root / 'submit').mkdir()
+        external = self.base / 'external'
+        external.mkdir()
+        (root / 'submit' / 'common').symlink_to(external, target_is_directory=True)
+        with self.assertRaises(ProjectError):
+            self.boot(verification_root=root)
+        self.assertEqual(list(external.iterdir()), [])
+        self.assertFalse((root / '.nsim').exists())
 
     def test_duplicate_names_are_rejected_before_target_creation(self):
         self.boot(name='same')
@@ -253,14 +502,14 @@ class ProjectTests(unittest.TestCase):
         output.mkdir()
         events.mkdir()
         with self.assertRaisesRegex(ValueError, 'separate'):
-            run(plan, [self.rtl / 'output'], events, dry_run=True)
+            run(plan, [self.rtl / 'output'], dry_run=True)
         other = self.base / 'rtl-next'
         other.mkdir()
         (other / 'rtl.f').write_text('new.sv\n')
         (other / 'new.sv').write_text('module new; endmodule\n')
         projects.update(self.options(project=root, rtl_root=other, rtl_filelist=other / 'rtl.f'))
         check_identity(plan)
-        journal, _ = run(plan, [output], events, dry_run=True)
+        journal, _ = run(plan, [output], dry_run=True)
         preview = json.loads((journal / 'commands.json').read_text())
         self.assertIn(str(self.rtl / 'dut.sv'), preview['tasks'][0]['compile']['argv'])
         next_plan = create_plan(root, cases=['smoke'], submit_paths=[submit], seeds=[42], allow_missing_tools=True)
@@ -273,21 +522,24 @@ class ProjectTests(unittest.TestCase):
         self.boot()
         root = self.base / 'verification'
         submit = root / 'submit' / 'fake.json'
-        submit.write_text(json.dumps({'schema_version': 1, 'name': 'fake', 'adapter': 'fake',
+        submit.write_text(json.dumps({'schema_version': 1, 'name': 'fake', 'adapter': 'fake', 'scheduler': {'kind': 'local'},
                                     'fake': {'outcomes': {'smoke': 'fail'}}}))
         output, events = self.base / 'output', self.base / 'events'
         output.mkdir()
         events.mkdir()
         plan = create_plan(root, cases=['smoke'], submit_paths=[submit], seeds=[42])
-        journal, state = run(plan, [output], events)
+        journal, state = run(plan, [output])
         self.assertFalse(state['passed'])
-        original = (journal / 'plan.json').read_bytes()
+        original = json.loads((journal / 'run.json').read_text())['plan']
         new_list = self.rtl / 'new.f'
         new_list.write_text('dut.sv\n')
         projects.update(self.options(project=root, rtl_filelist=new_list))
         new_journal, _ = replay(journal)
-        self.assertNotEqual(new_journal, journal)
-        self.assertEqual((journal / 'plan.json').read_bytes(), original)
+        self.assertEqual(new_journal, journal)
+        replay_plan = json.loads((journal / 'run.json').read_text())['plan']
+        self.assertEqual(replay_plan['snapshots'], original['snapshots'])
+        self.assertEqual(replay_plan['input_hashes'], original['input_hashes'])
+        self.assertEqual(replay_plan['source']['id'], original['id'])
 
     def test_launcher_queries_without_runtime_and_uses_shared_layout(self):
         spec = importlib.util.spec_from_file_location('nsim_installer_test', REPO / 'nsim-install.py')

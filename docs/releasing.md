@@ -1,4 +1,4 @@
-# `nsim` 打包与版本发布
+# NSIM 开发文档：构建与发布 nsim
 
 NSIM 是开发环境；发布物是 `src/nsim` 对应的 Python distribution，以及 `nsim` CLI。`pyproject.toml` 是包名、运行依赖、最低 Python 版本、入口点和**唯一版本号来源**。`src/nsim/__init__.py` 从已安装的 distribution metadata 读取版本。ASIC 工程、仿真输出、控制事件和本机 `.venv` 不属于 wheel。
 
@@ -7,9 +7,11 @@ NSIM 是开发环境；发布物是 `src/nsim` 对应的 Python distribution，�
 - 初期使用手工维护的 PEP 440 版本，例如 `0.1.0`、`0.2.0rc1`。每次发布只修改 `pyproject.toml` 中的 `project.version`，不在 Python 源码另存一份。
 - 评审通过后提交发布内容，再将该提交标记为 `v<version>`。发布检查要求干净的工作树、该 tag 指向当前提交、构建产物与当前源码逐文件一致。
 - 新工程通过 `.nsim/.nsim_version` 选择精确版本，稳定启动器把该版本分派到独立虚拟环境。版本选择不再写入 `nsim.toml`。
-- 当前 `0.1.0` 是待评审实现的候选版本；没有 tag，也没有正式发布。
+- 当前 `pyproject.toml` 使用候选版本 `0.1.0`；2026-10-27 的远端核对记录为尚无 tag/Release，正式交付时应重新核验远端状态。
 
 ## 本地构建与验收
+
+执行测试的节点须满足[环境只读保护要求](read_only_environment.md)；不能通过跳过保护完成验收。
 
 以下命令在 NSIM 仓库根目录执行。构建产物放在独立目录，避免混入其它版本：
 
@@ -43,6 +45,8 @@ python3 nsim-install.py bundle create \
 
 命令同时写出 `.sha256`；离线包包含安装器、主 wheel、依赖 wheel 和每个 wheel 的 SHA-256。目标 Python/平台不同可传 `--platform`、`--python-version`、`--implementation`、`--abi`，并必须在实际目标环境验收。目标机导入包时用 `--no-index --find-links` 安装，不能把公网包索引作为隐式后备。发布 Release 前验证 `nsim-install.py install --bundle`、`nsim switch`、普通运行和历史重跑；未配置 Release 时只能验证本地候选流程。
 
+同一离线包支持个人安装（默认或 `--user`）、系统共享安装（`--system`，目录 `/opt/nsim`）和自定义目录（`--root`），这三个选项互斥。发布验收应覆盖默认个人目录、共享启动器下的个人安装、共享目录安装与读取，以及无写权限时失败；自动化测试将共享目录重定向到临时位置，实际部署仍需验证目标机的 Python、目录权限和 shell 配置。完整部署命令见 [个人与系统安装指南](../user_guide.md#安装器和版本目录)。
+
 ## 分发渠道
 
 - **当前建议：**把 wheel、sdist、hash、安装器和目标平台离线包作为受控 Git release 交付。联网安装器按 tag 下载 wheel 与 `SHA256SUMS`；网络受限机器人工传入离线包。
@@ -51,4 +55,17 @@ python3 nsim-install.py bundle create \
 
 构建流程采用 [PyPA 打包指南](https://packaging.python.org/en/latest/tutorials/packaging-projects/) 的 wheel + sdist 形式。若选择 GitHub Actions 公开发布，可按 [PyPA Trusted Publishing 指南](https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/)把构建和发布拆成两个作业，并在发布环境设置人工审核。
 
-稳定启动器内嵌与核心相同的项目路径发现代码，以便没有任何可用工具版本时仍能提供基本查询。修改 `src/nsim/project_paths.py` 后运行 `scripts/sync_project_layout.py` 更新安装器，测试会检查两者逐字一致。
+稳定启动器内嵌与核心相同的项目路径发现代码和 CLI 简写定义，以便没有任何可用工具版本时仍能提供基本查询，并在分派版本前展开简写。修改 `src/nsim/project_paths.py` 或 `src/nsim/cli_aliases.py` 后运行 `scripts/sync_project_layout.py` 更新安装器，测试会检查内嵌内容逐字一致。
+
+新项目的 `submit/submit_demo.md` 由 `src/nsim/submit_templates.py` 中的 `guide()` 生成；仓库中的 [Submit 语法](submit.md) 与其保持逐字一致。修改生成说明后同步仓库副本，再运行测试：
+
+```sh
+.venv/bin/python - <<'PY'
+from pathlib import Path
+from nsim.submit_templates import guide
+Path('docs/submit.md').write_text(guide(), encoding='utf-8')
+PY
+.venv/bin/python -m unittest discover -s tests -p 'test_submit_inheritance.py' -q
+```
+
+生成说明随 Python 模块进入 wheel，仓库说明随 docs 进入 sdist；项目已有模板不会因安装新版本或重复 bootstrap 自动覆盖。

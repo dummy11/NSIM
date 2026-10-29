@@ -27,10 +27,18 @@ REPO = os.environ.get("NSIM_RELEASE_REPO", "dummy11/NSIM")
 VERSION_RE = re.compile(r"[0-9]+(?:\.[0-9]+){2}(?:(?:a|b|rc)[0-9]+)?(?:\.post[0-9]+)?(?:\.dev[0-9]+)?")
 PIN = ".nsim_version"
 MANAGEMENT = {"bootstrap", "install", "update", "switch", "versions", "bundle"}
+USER_ROOT = Path("~/.local/share/nsim")
+SYSTEM_ROOT = Path("/opt/nsim")
 
 
 # Generated from src/nsim/project_paths.py; checked by tests.
 PROJECT_LAYOUT_SOURCE = '"""Project locations and registry reads; usable without simulation dependencies."""\nimport json\nimport os\nfrom pathlib import Path\n\n\nclass ProjectError(ValueError):\n    pass\n\n\ndef registry_path():\n    return Path(os.environ.get(\'XDG_CONFIG_HOME\') or \'~/.config\').expanduser().resolve() / \'nsim\' / \'projects.json\'\n\n\ndef load_registry():\n    path = registry_path()\n    if not path.exists():\n        return {\'schema_version\': 1, \'projects\': []}\n    try:\n        data = json.loads(path.read_text(encoding=\'utf-8\'))\n    except ValueError as exc:\n        raise ProjectError(f\'invalid project registry: {path}: {exc}\') from exc\n    if not isinstance(data, dict) or data.get(\'schema_version\') != 1 or not isinstance(data.get(\'projects\'), list):\n        raise ProjectError(f\'invalid project registry: {path}\')\n    names, roots = set(), set()\n    for entry in data[\'projects\']:\n        if not isinstance(entry, dict) or set(entry) != {\'name\', \'root\', \'descriptor\'} or any(not isinstance(v, str) or not v for v in entry.values()):\n            raise ProjectError(f\'invalid project registry entry: {path}\')\n        if (entry[\'name\'] in names or entry[\'root\'] in roots or\n                any(\'\\0\' in v for v in entry.values()) or\n                not Path(entry[\'root\']).is_absolute() or not Path(entry[\'descriptor\']).is_absolute()):\n            raise ProjectError(f\'duplicate or invalid project registry entry: {path}\')\n        names.add(entry[\'name\'])\n        roots.add(entry[\'root\'])\n    return data\n\n\ndef marker(root):\n    return any(os.path.lexists(root / p) for p in (\'.nsim\', \'nsim.toml\', \'nsim.yaml\', \'.nsim_version\'))\n\n\ndef find_root(start=None):\n    start = Path(start or Path.cwd()).expanduser().resolve()\n    for root in (start, *start.parents):\n        # nsim.toml inside the control directory belongs to its parent project.\n        if root.name == \'.nsim\':\n            continue\n        if marker(root):\n            return root\n    return None\n\n\ndef resolve_root(value=None):\n    if value is None:\n        root = find_root()\n        if root is None:\n            raise ProjectError(\'no project found; run nsim bootstrap or specify --project\')\n        return root\n    value = str(value)\n    if \'/\' not in value and value not in (\'.\', \'..\'):\n        matches = [e for e in load_registry()[\'projects\'] if e[\'name\'] == value]\n        if matches:\n            return Path(matches[0][\'root\'])\n    path = Path(value).expanduser()\n    if path.name in (\'nsim.toml\', \'nsim.yaml\'):\n        path = path.parent\n    if path.name == \'.nsim\':\n        path = path.parent\n    return path.resolve()\n\n\ndef descriptor_path(value):\n    root = resolve_root(value)\n    hidden = root / \'.nsim\'\n    legacy = [root / n for n in (\'nsim.toml\', \'nsim.yaml\') if os.path.lexists(root / n)]\n    if os.path.lexists(hidden):\n        if hidden.is_symlink() or not hidden.is_dir():\n            raise ProjectError(f\'{hidden}: must be a real directory\')\n        if legacy or os.path.lexists(root / \'.nsim_version\'):\n            raise ProjectError(f\'{root}: conflicting legacy and .nsim project configuration\')\n        candidates = [hidden / n for n in (\'nsim.toml\', \'nsim.yaml\') if os.path.lexists(hidden / n)]\n    else:\n        candidates = legacy\n    if len(candidates) != 1 or not candidates[0].is_file() or candidates[0].is_symlink():\n        raise ProjectError(f\'{root}: expected exactly one regular nsim.toml or nsim.yaml\')\n    return candidates[0]\n\n\ndef read_pin(root):\n    path = descriptor_path(root).parent / \'.nsim_version\'\n    if path.is_symlink() or not path.is_file():\n        raise ProjectError(f\'{path}: missing regular version file\')\n    content = path.read_text(encoding=\'utf-8\')\n    from re import fullmatch\n    if not fullmatch(r\'[0-9]+\\.[0-9]+\\.[0-9]+(?:(?:a|b|rc)[0-9]+)?(?:\\.post[0-9]+)?(?:\\.dev[0-9]+)?\\n\', content):\n        raise ProjectError(f\'{path}: expected one exact version and newline\')\n    return content.strip()\n'
+
+
+# Generated from src/nsim/cli_aliases.py by scripts/sync_project_layout.py.
+CLI_ALIASES_SOURCE = '"""Explicit CLI aliases, also embedded in the dependency-free launcher."""\n\n\nCOMMAND_ALIASES = {\n    \'bootstrap\': (\'init\',), \'list\': (\'ls\',), \'status\': (\'st\',),\n    \'update\': (\'up\',), \'switch\': (\'use\',), \'project\': (\'proj\',),\n    \'submit\': (\'sub\',), \'capabilities\': (\'caps\',), \'version\': (\'ver\',),\n    \'rerun\': (\'rr\',), \'recover\': (\'rc\',), \'report\': (\'rpt\',),\n    \'storage\': (\'disk\',), \'install\': (\'inst\',), \'versions\': (\'vers\',),\n    \'bundle\': (\'pack\',),\n}\n\nOPTION_ALIASES = {\n    \'--version\': (\'-V\',), \'--json\': (\'-J\',), \'--project\': (\'-p\',),\n    \'--name\': (\'-N\',), \'--verification-root\': (\'-vr\',),\n    \'--rtl-root\': (\'-rtl\',), \'--rtl-filelist\': (\'-rf\',),\n    \'--verification-filelist\': (\'-vf\',), \'--nsim-version\': (\'-nv\',),\n    \'--output-root\': (\'-o\',), \'--case\': (\'-c\',), \'--submit\': (\'-s\',),\n    \'--seed\': (\'-S\',), \'-mode\': (\'-m\', \'--mode\'),\n    \'-dir\': (\'-d\', \'--dir\'), \'-com-dir\': (\'-cd\', \'--com-dir\'),\n    \'-sim-dir\': (\'-sd\', \'--sim-dir\'), \'-repeat\': (\'-r\', \'--repeat\'),\n    \'--jobs\': (\'-j\', \'-jobs\'), \'--retries\': (\'-retry\',),\n    \'--retry-seconds\': (\'-rt\',), \'--min-free-bytes\': (\'-fb\',),\n    \'--min-free-inodes\': (\'-fi\',), \'--dry-run\': (\'-n\',),\n    \'--scheduler\': (\'-sched\',), \'--resource\': (\'-R\',),\n    \'--license\': (\'-lic\',), \'--extends\': (\'-e\',),\n    \'--plusargs\': (\'-pa\',),\n    \'--bundle\': (\'-b\',), \'--wheel\': (\'-w\',), \'--wheelhouse\': (\'-wh\',),\n    \'--checksums\': (\'-sum\',), \'--sha256\': (\'-sha\',), \'--all\': (\'-a\',),\n    \'--user\': (\'-u\',), \'--system\': (\'-sys\',), \'--output\': (\'-o\',),\n    \'--download-deps\': (\'-deps\',), \'--platform\': (\'-plat\',),\n    \'--python-version\': (\'-py\',), \'--implementation\': (\'-impl\',),\n}\n\n\ndef add_argument(parser, *names, **kwargs):\n    """Keep aliases on the original action, including mutually exclusive groups."""\n    expanded = list(names)\n    for name in names:\n        for alias in OPTION_ALIASES.get(name, ()):\n            if alias not in expanded:\n                expanded.append(alias)\n    return parser.add_argument(*expanded, **kwargs)\n\n\ndef add_command(commands, name, **kwargs):\n    parser = commands.add_parser(name, aliases=COMMAND_ALIASES.get(name, ()), **kwargs)\n    parser.set_defaults(**{commands.dest: name})\n    return parser\n\n\ndef canonical_command(name):\n    return next((command for command, aliases in COMMAND_ALIASES.items() if name in aliases), name)\n\n\ndef runtime_arguments(argv):\n    """Expand runtime aliases before selecting/launching an installed wheel.\n\n    Only command positions and option spellings change. Values after \'=\' and\n    positional values (including names such as \'init\') remain untouched.\n    """\n    args = list(argv)\n    index = 0\n    while index < len(args):\n        token = args[index]\n        if token in (\'-o\', \'--output-root\'):\n            index += 2\n        elif token.startswith((\'-o=\', \'--output-root=\')) or (token.startswith(\'-o\') and not token.startswith(\'--\')):\n            index += 1\n        else:\n            break\n    if index >= len(args):\n        return args\n    command = args[index] = canonical_command(args[index])\n    if command == \'project\' and index + 1 < len(args) and args[index + 1] == \'ls\':\n        args[index + 1] = \'list\'\n\n    # Installer options are handled by its own parser. Preserve existing -o/-j\n    # spellings except in commands which have only just gained those aliases.\n    aliases = {alias: option for option, values in OPTION_ALIASES.items()\n               for alias in values if option not in (\n                   \'--bundle\', \'--wheel\', \'--wheelhouse\', \'--checksums\', \'--sha256\',\n                   \'--all\', \'--user\', \'--system\', \'--output\', \'--download-deps\',\n                   \'--platform\', \'--python-version\', \'--implementation\')}\n    if command not in (\'bootstrap\', \'update\'):\n        aliases.pop(\'-o\', None)\n    if command not in (\'rerun\', \'recover\'):\n        aliases.pop(\'-j\', None)\n        aliases.pop(\'-jobs\', None)\n    existing = set(OPTION_ALIASES) | set(aliases) | {\n        \'-sub\', \'-seed\', \'-scheduler\', \'-queue\', \'-q\', \'-l\', \'-jobs\', \'-j\',\n        \'-o\', \'-h\', \'--help\', \'--caselist\', \'--queue\', \'-rl\', \'--regr-list\',\n    }\n    attached = {key: value for key, value in aliases.items()\n                if len(key) == 2 and key not in (\'-n\', \'-J\', \'-V\')}\n    for position in range(index + (0 if command.startswith(\'-\') else 1), len(args)):\n        token = args[position]\n        if token == \'--\':\n            break\n        option, separator, value = token.partition(\'=\')\n        if option in aliases:\n            args[position] = aliases[option] + (separator + value if separator else \'\')\n        elif option not in existing and token[:2] in attached:\n            args[position] = attached[token[:2]] + \'=\' + token[2:]\n    return args\n'
+_cli_aliases = {}
+exec(CLI_ALIASES_SOURCE, _cli_aliases)
 
 
 def project_layout():
@@ -54,7 +62,15 @@ def default_root():
     here = Path(__file__).resolve()
     if here.parent.name == "bin" and (here.parent.parent / "versions").is_dir():
         return here.parent.parent
-    return Path(os.environ.get("NSIM_HOME") or "~/.local/share/nsim").expanduser().resolve()
+    return Path(os.environ.get("NSIM_HOME") or USER_ROOT).expanduser().resolve()
+
+
+def runtime_environment(**overrides):
+    # A shell activated for another project must not redirect the selected venv.
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in ('PYTHONPATH', 'PYTHONHOME', 'PYTHONUSERBASE')}
+    environment.update(PYTHONNOUSERSITE='1', **overrides)
+    return environment
 
 
 def sha256(path):
@@ -92,7 +108,7 @@ def bootstrap(root):
     interpreter = os.fsencode(str(Path(sys.executable).resolve()))
     if b"\n" in interpreter or b" " in interpreter:
         raise InstallError("installer Python path cannot be represented in a launcher shebang")
-    script = b"#!" + interpreter + b"\n" + original.partition(b"\n")[2]
+    script = b"#!" + interpreter + b" -I\n" + original.partition(b"\n")[2]
     for command in ("nsim", "nsim-install"):
         atomic_bytes(root / "bin" / command, script, 0o755)
     return root
@@ -211,12 +227,13 @@ def install_wheel(root, wheel, version=None, offline=True, links=(), expected=No
                 for folder in dict.fromkeys([wheel.parent, *(Path(p).resolve() for p in links)]):
                     command.extend(["--find-links", str(folder)])
             command.append(str(wheel))
-            env = dict(os.environ, PIP_DISABLE_PIP_VERSION_CHECK="1")
+            env = runtime_environment(PIP_DISABLE_PIP_VERSION_CHECK="1")
             if offline:
                 env["PIP_NO_INDEX"] = "1"
             subprocess.run(command, env=env, check=True)
             cli = environment / "bin" / "nsim"
-            result = subprocess.run([str(cli), "--version"], capture_output=True, text=True, check=True)
+            result = subprocess.run([str(cli), "--version"], capture_output=True, text=True, check=True,
+                                    env=runtime_environment())
             if result.stdout.strip() != f"nsim {version}":
                 raise InstallError("installed nsim reports a different version")
             record = {"schema_version": 1, "version": version, "wheel_sha256": digest,
@@ -380,21 +397,62 @@ def find_pin_from_cwd():
 
 
 def version_from_journal(path):
-    plan = json.loads((Path(path).resolve() / "plan.json").read_text(encoding="utf-8"))
+    directory = Path(path).resolve()
+    if (directory / 'report' / 'plan.json').is_file():
+        directory = directory / 'report'
+    if not (directory / 'plan.json').exists() and (directory / 'run.json').is_file():
+        reference = json.loads((directory / 'run.json').read_text(encoding='utf-8'))
+        if isinstance(reference, dict) and reference.get('schema_version') == 2 and 'plan' in reference:
+            return valid_version(reference['plan']['runtime']['version'])
+        if (not isinstance(reference, dict) or not isinstance(reference.get('record_dir'), str)
+                or not reference['record_dir']):
+            raise InstallError(f'invalid simulation record reference: {directory}')
+        directory = Path(reference['record_dir']).resolve()
+        if not (directory / 'plan.json').exists() and (directory / 'run.json').is_file():
+            reference = json.loads((directory / 'run.json').read_text(encoding='utf-8'))
+            return valid_version(reference['plan']['runtime']['version'])
+    plan = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
     return valid_version(plan["runtime"]["version"])
 
 
 def selected_version(args, root):
-    if args and args[0] in {"rerun", "recover"} and len(args) > 1:
-        return version_from_journal(args[1])
-    if args[:2] == ["report", "show"] and len(args) > 2:
-        return version_from_journal(args[2])
-    project_arg = next((item.partition("=")[2] for item in args if item.startswith("--project=")), None)
-    if project_arg is None and "--project" in args:
-        index = args.index("--project")
-        if index + 1 >= len(args):
-            raise InstallError("--project requires a path")
-        project_arg = args[index + 1]
+    # Leading execution output overrides must not hide replay's recorded version.
+    args = _cli_aliases['runtime_arguments'](args)
+    while args and (args[0] in ('-o', '--output-root') or args[0].startswith(('-o=', '--output-root='))
+                    or args[0].startswith('-o') and not args[0].startswith('--')):
+        option = args.pop(0)
+        if option in ('-o', '--output-root'):
+            if not args or args[0].startswith('-'):
+                raise InstallError(f'{option} requires a path')
+            args.pop(0)
+    replay = args and args[0] in {'rerun', 'recover'}
+    report = args[:2] == ['report', 'show']
+    if replay or report:
+        # Options may precede SOURCE, e.g. rr -j4 RECORD or rpt show -J RECORD.
+        selector = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        selector.add_argument('source', nargs='?')
+        selector.add_argument('-h', '--help', action='store_true')
+        if replay:
+            selector.add_argument('-o', '--output-root', action='append')
+            selector.add_argument('-seed', '--seed')
+            selector.add_argument('-j', '-jobs', '--jobs')
+            selector.add_argument('--retries')
+            selector.add_argument('--retry-seconds')
+        else:
+            selector.add_argument('--json', action='store_true')
+        options, _ = selector.parse_known_args(args[1 if replay else 2:])
+        if options.source is not None:
+            return version_from_journal(options.source)
+    project_arg = None
+    for index, item in enumerate(args):
+        if item == '--':
+            break
+        if item.startswith('--project='):
+            project_arg = item.partition('=')[2]
+        elif item == '--project':
+            if index + 1 >= len(args) or args[index + 1].startswith('-'):
+                raise InstallError('--project requires a path')
+            project_arg = args[index + 1]
     if project_arg is not None:
         return read_pin(project_directory(project_arg))
     if args[:2] == ["project", "inspect"] and len(args) > 2:
@@ -412,12 +470,13 @@ def selected_version(args, root):
 
 
 def launch(root, args):
+    args = _cli_aliases['runtime_arguments'](args)
     version = selected_version(args, root)
     record = receipt(root, version)
     if not record:
         raise InstallError(f"nsim {version} is not installed; run nsim install {version}")
     executable = root / "versions" / version / "venv" / "bin" / "nsim"
-    environment = dict(os.environ, NSIM_HOME=str(root), NSIM_WHEEL_SHA256=record["wheel_sha256"])
+    environment = runtime_environment(NSIM_HOME=str(root), NSIM_WHEEL_SHA256=record["wheel_sha256"])
     os.execve(executable, [str(executable), *args], environment)
 
 
@@ -432,7 +491,8 @@ def management_version(root):
         try:
             if not receipt(root, version):
                 continue
-            probe = subprocess.run([str(exe), 'capabilities', '--json'], capture_output=True, text=True, timeout=10)
+            probe = subprocess.run([str(exe), 'capabilities', '--json'], capture_output=True, text=True, timeout=10,
+                                   env=runtime_environment())
             data = json.loads(probe.stdout)
             if (probe.returncode == 0 and isinstance(data, dict) and data.get('version') == version and
                     isinstance(data.get('project_schemas'), list) and 2 in data['project_schemas']):
@@ -446,9 +506,9 @@ def basic_query(args, root):
     """Read-only diagnosis even when no versioned management runtime is installed."""
     layout = project_layout()
     parser = argparse.ArgumentParser(prog='nsim ' + args[0])
-    parser.add_argument('--json', action='store_true')
+    _cli_aliases['add_argument'](parser, '--json', action='store_true')
     if args[0] == 'status':
-        parser.add_argument('--project')
+        _cli_aliases['add_argument'](parser, '--project')
     options = parser.parse_args(args[1:])
     pending = layout.registry_path().parent / 'projects.transaction.json'
     if pending.exists():
@@ -499,6 +559,7 @@ def basic_query(args, root):
 
 
 def project_command(root, args):
+    args = _cli_aliases['runtime_arguments'](args)
     if args[0] == 'update' and any(a in ('--bundle', '--to', '--sha256') for a in args):
         raise InstallError('nsim update edits project configuration; use nsim install for tool installation')
     version = management_version(root)
@@ -508,51 +569,61 @@ def project_command(root, args):
         raise InstallError('no installed runtime supports project management; run nsim install VERSION')
     exe = root / 'versions' / version / 'venv' / 'bin' / 'nsim'
     record = receipt(root, version)
-    environment = dict(os.environ, NSIM_HOME=str(root), NSIM_WHEEL_SHA256=record['wheel_sha256'])
+    environment = runtime_environment(NSIM_HOME=str(root), NSIM_WHEEL_SHA256=record['wheel_sha256'])
     os.execve(exe, [str(exe), *args], environment)
 
 
 def parser_for(root):
     parser = argparse.ArgumentParser(prog="nsim-install", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    bootstrap_cmd = commands.add_parser("bootstrap", help="install the stable nsim launcher")
-    bootstrap_cmd.add_argument("--root", type=Path, default=root)
-    install = commands.add_parser("install", help="install a version from GitHub, a bundle, or local wheels")
-    install.add_argument("version", nargs="?")
-    install.add_argument("--all", action="store_true", help="install all published stable releases")
-    install.add_argument("--bundle", type=Path)
-    install.add_argument("--wheel", type=Path)
-    install.add_argument("--wheelhouse", type=Path)
-    install.add_argument("--checksums", type=Path)
-    install.add_argument("--sha256", help="expected SHA-256 of the bundle or local wheel")
-    install.add_argument("--root", type=Path, default=root)
-    update = commands.add_parser("update", help="download/install a version without switching a project")
-    update.add_argument("--to", dest="version")
-    update.add_argument("--bundle", type=Path)
-    update.add_argument("--sha256")
-    update.add_argument("--root", type=Path, default=root)
-    switch = commands.add_parser("switch", help="select an installed version for one project")
-    switch.add_argument("version")
-    switch.add_argument("--project", type=Path, required=True)
-    switch.add_argument("--root", type=Path, default=root)
-    versions = commands.add_parser("versions", help="list installed versions")
-    versions.add_argument("--remote", action="store_true")
-    versions.add_argument("--root", type=Path, default=root)
-    bundle = commands.add_parser("bundle", help="prepare an offline installation bundle")
+    bootstrap_cmd = _cli_aliases['add_command'](commands, "bootstrap", help="install the stable nsim launcher")
+    _cli_aliases['add_argument'](bootstrap_cmd, "--root", type=Path, default=root)
+    install = _cli_aliases['add_command'](commands, "install", help="install a version from GitHub, a bundle, or local wheels")
+    _cli_aliases['add_argument'](install, "version", nargs="?")
+    _cli_aliases['add_argument'](install, "--all", action="store_true", help="install all published stable releases")
+    _cli_aliases['add_argument'](install, "--bundle", type=Path)
+    _cli_aliases['add_argument'](install, "--wheel", type=Path)
+    _cli_aliases['add_argument'](install, "--wheelhouse", type=Path)
+    _cli_aliases['add_argument'](install, "--checksums", type=Path)
+    _cli_aliases['add_argument'](install, "--sha256", help="expected SHA-256 of the bundle or local wheel")
+    destination = install.add_mutually_exclusive_group()
+    _cli_aliases['add_argument'](destination, "--user", dest="scope", action="store_const", const="user",
+                             help="install for the current user in ~/.local/share/nsim (default)")
+    _cli_aliases['add_argument'](destination, "--system", dest="scope", action="store_const", const="system",
+                             help="install for all users in /opt/nsim; requires write permission")
+    _cli_aliases['add_argument'](destination, "--root", type=Path, help="install in a custom directory")
+    update = _cli_aliases['add_command'](commands, "update", help="download/install a version without switching a project")
+    _cli_aliases['add_argument'](update, "--to", dest="version")
+    _cli_aliases['add_argument'](update, "--bundle", type=Path)
+    _cli_aliases['add_argument'](update, "--sha256")
+    _cli_aliases['add_argument'](update, "--root", type=Path, default=root)
+    switch = _cli_aliases['add_command'](commands, "switch", help="select an installed version for one project")
+    _cli_aliases['add_argument'](switch, "version")
+    _cli_aliases['add_argument'](switch, "--project", type=Path, required=True)
+    _cli_aliases['add_argument'](switch, "--root", type=Path, default=root)
+    versions = _cli_aliases['add_command'](commands, "versions", help="list installed versions")
+    _cli_aliases['add_argument'](versions, "--remote", action="store_true")
+    _cli_aliases['add_argument'](versions, "--root", type=Path, default=root)
+    bundle = _cli_aliases['add_command'](commands, "bundle", help="prepare an offline installation bundle")
     actions = bundle.add_subparsers(dest="action", required=True)
-    create = actions.add_parser("create")
-    create.add_argument("--wheel", type=Path, required=True)
-    create.add_argument("--output", type=Path, required=True)
-    create.add_argument("--wheelhouse", type=Path)
-    create.add_argument("--download-deps", action="store_true")
+    create = _cli_aliases['add_command'](actions, "create")
+    _cli_aliases['add_argument'](create, "--wheel", type=Path, required=True)
+    _cli_aliases['add_argument'](create, "--output", type=Path, required=True)
+    _cli_aliases['add_argument'](create, "--wheelhouse", type=Path)
+    _cli_aliases['add_argument'](create, "--download-deps", action="store_true")
     for name in ("platform", "python-version", "implementation", "abi"):
-        create.add_argument("--" + name)
+        _cli_aliases['add_argument'](create, "--" + name)
     return parser
 
 
 def manage(args, root):
     options = parser_for(root).parse_args(args)
-    root = Path(getattr(options, "root", root)).expanduser().resolve()
+    root = getattr(options, "root", root)
+    if options.command == "install":
+        # A shared launcher or NSIM_HOME must not silently redirect a default
+        # user installation into a shared directory.
+        root = root or (SYSTEM_ROOT if options.scope == "system" else USER_ROOT)
+    root = Path(root).expanduser().resolve()
     if options.command == "bootstrap":
         print(f"launcher installed: {bootstrap(root) / 'bin' / 'nsim'}")
         return
@@ -579,7 +650,8 @@ def manage(args, root):
         if not receipt(root, version):
             raise InstallError(f"nsim {version} is not installed; run nsim install {version}")
         executable = root / "versions" / version / "venv" / "bin" / "nsim"
-        probe = subprocess.run([str(executable), "--version"], capture_output=True, text=True, check=True)
+        probe = subprocess.run([str(executable), "--version"], capture_output=True, text=True, check=True,
+                               env=runtime_environment())
         if probe.stdout.strip() != f"nsim {version}":
             raise InstallError(f"nsim {version} is not runnable")
         project = project_directory(options.project)
@@ -634,6 +706,8 @@ def main(argv=None):
         print("nsim installer requires Python 3.9 or newer", file=sys.stderr)
         return 2
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv:
+        argv[0] = _cli_aliases['canonical_command'](argv[0])
     root = default_root()
     try:
         if Path(sys.argv[0]).name == 'nsim' and argv and argv[0] in ('bootstrap', 'list', 'status', 'update', 'switch'):

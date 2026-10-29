@@ -3,3 +3,4 @@ include user_guide.md
 recursive-include docs *.md
 include scripts/sync_project_layout.py
 include scripts/check_distribution.py
+include tests/dashboard_client_test.js

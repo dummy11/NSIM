@@ -1,4 +1,6 @@
-# nsim 架构
+# NSIM 开发文档：nsim 实现架构
+
+本页描述 2026-10-28 工作区的组件与执行契约。功能验证记录见 [实现状态](implementation_status.md)，接口示例见 [使用指南](../user_guide.md)。原生 VCS/DPI/Verdi 当前仅提供命令预览；实际执行由 fake 或工程 command 包装器承担。
 
 ## 系统边界
 
@@ -16,24 +18,39 @@
 CLI
  |
  v
-Command Services
+CLI / Project Management / Planner
  |
- +-- Discovery Service
- +-- Config Loader
- +-- Project Model
- +-- Regression Planner
- +-- Scheduler Interface
- |     +-- Local Multiprocessing Scheduler
- |     +-- LSF Scheduler
- +-- Simulator Interface
- |     +-- Synopsys VCS Adapter
- |     +-- Verdi Adapter
- +-- Output Store
- +-- Result Checkers
- +-- Report Generator
+ +-- Project discovery and transactional registration
+ +-- Config and submit inheritance -> immutable plan
+ +-- Execution controller
+ |     +-- Compile products and shared/exclusive locks
+ |     +-- Local subprocesses / LSF worker
+ |     +-- Ordered hooks -> log analysis -> result checks
+ +-- Output layout, ownership and storage checks
+ +-- Terminal Dashboard / final reports / evidence validation
+ +-- VCS / DPI / Verdi command previews
 ```
 
+| 模块 | 主要职责 |
+| --- | --- |
+| `cli.py`、`projects.py`、`project_paths.py` | 命令解析、项目发现、登记与事务更新 |
+| `config.py`、`submit_config.py`、`submit_templates.py` | 配置校验、父子 submit 合并、新项目模板与随项目语法说明 |
+| `caselist.py`、`caselist_templates.py` | 逻辑用例解析、运行参数映射与分层覆盖、bootstrap 用例示例 |
+| `planning.py`、`eda.py`、`eda_config.py` | 任务展开、输入/运行时快照、编译身份、EDA 命令预览 |
+| `service.py`、`runner.py`、`compilation.py` | 并发派发、attempt、编译复用与重跑 |
+| `lsf.py`、`lsf_worker.py` | 调度客户端调用、终态确认、执行节点校验与运行 |
+| `hooks.py`、`log_analysis.py`、`checks.py` | 阶段 hooks、日志扫描、结构化结果判定 |
+| `layout.py`、`ownership.py`、`storage.py`、`runtime.py` | 输出路径、归属/锁、存储证据、内置进程运行时隔离 |
+| `dashboard.py`、`reports.py` | 增量进度、最终报告、终态证据读取 |
+
 ## 组件职责
+
+Caselist 的第一列始终是逻辑用例名。解析器将清单默认值、行内字段/plusargs、可选 YAML
+映射与用例覆盖规范化，再按每个 submit 解析有效运行参数。默认语义字段为 uvm_test、seq、
+c_test，支持工程扩展；原始 plusargs 可直接参与覆盖。任务身份仍为 submit + case + seed。
+跨清单同名且有效参数相同的用例去重，存在冲突时在规划阶段拒绝。
+计划保存 case_definitions、各 task 的 case_config、清单及 YAML 快照/哈希；运行与预览共用
+已经合并的参数，运行参数不进入仿真器编译身份。详见 [Caselist 语法](caselist.md)。
 
 ### CLI
 
@@ -47,10 +64,12 @@ Command Services
 
 加载并校验：
 
-- nsim 全局或 workspace 配置
 - 工程描述文件
 - 纯文本 caselist
-- submit JSON 文件，并按 `nsim` 定义的 schema 强校验
+- submit JSON 及其显式父模板，合并后按 `nsim` 定义的 schema 强校验
+- 命令行执行选项和调度覆盖值
+
+`extends` 支持一个父文件、一层继承；对象递归合并，数组和每个 hook 阶段整体替换。相对可执行路径绑定声明文件目录，父子原文和哈希进入计划。新项目模板及完整字段见 [Submit 语法](submit.md)。当前没有另一个通用全局/workspace 配置文件层。
 
 schema 2 的相对路径以 verification 根目录为基准，schema 1 保留描述文件所在目录的旧语义。工具版本只有 `.nsim/.nsim_version` 一个来源；新项目默认解析最新已安装可用稳定版本并保存具体版本号。注册索引仅保存名称与配置入口，配置修改采用锁及可恢复事务。稳定安装入口与项目 bootstrap/update 不复用命令含义。
 
@@ -60,7 +79,7 @@ schema 2 的相对路径以 verification 根目录为基准，schema 1 保留描
 
 ### Regression Planner
 
-将用户请求展开为具体运行任务。例如，一个包含 20 个 case 的 caselist 和 3 个 submit JSON 文件会被展开为 60 个仿真任务，并在需要时附加编译任务。VCS compile 当前按 submit 独立规划，compile artifact 也按 submit 独立生成和追踪。
+将合并后的 caselist、submit 和 seed 展开为任务。例如，20 个 case × 3 个 submit × 2 个 seed 得到 120 个唯一仿真任务；重复组合只派发一次，保留清单来源。`-repeat` 在规划时生成一组不同 seed。编译按 submit 独立管理，同一 submit/输出根在一次 run/regr 内只编译一次；sim 读取已有兼容产物。原生 VCS 的同类命令目前只规划，不实际执行。
 
 ### Scheduler Interface
 
@@ -68,11 +87,11 @@ schema 2 的相对路径以 verification 根目录为基准，schema 1 保留描
 
 ### Local Multiprocessing Scheduler
 
-在当前机器上以可配置并发度运行任务。它应作为第一个实现的调度器，并可配合 fake simulator 验证核心流程，因为它不依赖真实 VCS、Verdi 或 LSF。
+线程负责协调与等待，实际编译/仿真在独立子进程中执行，按 `-jobs` 滚动补位。阶段执行器负责进程组、超时、取消、日志、hooks 和分析；fake 与 command 共用这些路径。本地锁随子进程继承，避免控制器异常退出后覆盖仍被使用的目录。
 
 ### LSF Scheduler
 
-将任务提交到 LSF，用于大规模 regression。队列、资源和 license 约束可以来自 submit JSON，也可以由 `nsim` 命令行覆盖。命令行约束优先级高于 submit 配置。该适配器应把 `bsub`、`bjobs` 和状态解析隔离在稳定 Python 接口之后。
+将任务提交到 LSF，用于大规模 regression。队列、资源和 license 约束可以来自 submit JSON，也可以由 `nsim` 命令行覆盖。命令行约束优先级高于 submit 配置。当前 `lsf.py` 负责真实 `bsub`、`bjobs`、`bkill` 调用与终态确认，`lsf_worker.py` 在执行节点校验并运行命令。默认调度器为 LSF；local 可显式选择。所有 submit 共用本次调用的未结束作业窗口，完成回调唤醒控制器补交。排队与暂停计入额度，未知状态不释放占用、不重投；持久目录标记保护控制器退出后仍可能运行的远程任务。详见 [LSF 执行](lsf_execution.md)。
 
 ### Simulator Interface
 
@@ -80,7 +99,7 @@ schema 2 的相对路径以 verification 根目录为基准，schema 1 保留描
 
 ### Synopsys VCS Adapter
 
-根据工程元数据和 submit JSON 构建 VCS 编译与仿真命令。它应支持：
+根据工程元数据和 submit JSON 构建 VCS 编译与仿真命令，当前只支持 dry-run。预览覆盖：
 
 - 编译选项
 - 仿真选项
@@ -88,36 +107,38 @@ schema 2 的相对路径以 verification 根目录为基准，schema 1 保留描
 - FSDB dump 选项，允许 submit 和 testbench plusarg 共同配合控制
 - DPI C 和 C++ 编译输入；DPI 编译使用独立 Makefile，编译结果以 `.so` 形式存在；DPI 产物默认工程共享，也可以通过 submit 控制为按 regression 或 run 隔离
 - 环境变量
-- timeout 和 retry 策略扩展点
+- 编译、仿真和 DPI 超时配置
 
-DPI `.so` 的默认共享位置位于工程 cache。
+DPI 的 project scope 预览路径为工程根下的 `.nsim-cache/dpi`；regression/run scope 使用输出目录内的路径。dry-run 不创建这些编译产物，实际 `.so` 构建、产物生命周期及输出隔离仍待实现与验收，见 [EDA dry-run](eda_dry_run.md)。
 
 ### Verdi Adapter
 
-基于已完成或进行中的 run，使用正确的 FSDB、设计数据库和工程上下文启动 Verdi。Verdi adapter 不负责仿真流程本身。Verdi debug 所需设计数据库路径由 VCS adapter 生成并记录到 task metadata。
+当前随 EDA dry-run 生成含设计数据库及 FSDB 路径的 Verdi 命令，不启动查看器，也没有 `verdi open` 子命令。实际调试入口需要后续接入真实工具和产物验证。
 
 ### Output Store
 
-创建和管理输出目录：
+通过 com/sim/run/regr 分离或组合编译与仿真；-mode 选择模式，-dir 选择工作区，-com-dir/-sim-dir 指定产物路径。接口契约见 [执行阶段](execution_stages.md)。创建和管理输出目录：
 
 ```text
-<output-root>/
-  regressions/
-    <regression-id>/
-      metadata.json
-      config/
-      build/
-      logs/
-      waves/
-      reports/
-      tasks/
+output/
+  submit_name/workspace/                  # 单跑
+    com_dir/
+    sim_dir/<case>_<seed>/
+  regr_dir/<regression-id>/               # 一次回归的完整产物
+    report/                              # plan/state/live/report/final
+    submit_name/workspace/
+      com_dir/
+      sim_dir/<case>_<seed>/
+  regr_batch_dir/<batch-id>/report/       # regression list 的成员关系与汇总
 ```
 
-Output root 的默认位置来自用户配置或环境变量。Output Store 负责稳定路径、元数据写入以及后续保留策略。
+Output root 通过 bootstrap/update 保存为项目默认值，run 参数可以覆盖。单跑保留固定目录与覆盖规则；
+回归及其失败重跑使用新的独立目录，汇总文件放在 report/。同一次回归内部共享编译，不与单跑或另一回归
+共享可写编译目录。持有目录锁期间才允许准备产物，dry-run 只保存预览，不清理编译或仿真结果。
 
 ### Report Generator
 
-读取任务元数据和 log，生成面向人的报告和机器可读摘要。报告应基于已记录 artifact 生成，而不是依赖实时调度器状态。
+`hooks.py` 统一 local/LSF 阶段执行与有序 hooks；`log_analysis.py` 在 post_sim 的最后执行标准 VCS/UVM 扫描（或使用用户的替代 hook）。case 的 `run.json.analysis`（内嵌 schema 3） 只保留结论、单行原因、首错位置、分阶段计数和扫描完整性，详细诊断留在原始日志；共享编译单独保存分析。报告读取已保存摘要，生成面向人的报告和机器可读汇总。实时刷新不重新读取全部日志；终态和显式查询校验证据。详见 [Hooks 与日志分析](hooks_and_log_analysis.md)。
 
 ## 数据流
 
@@ -126,44 +147,43 @@ Output root 的默认位置来自用户配置或环境变量。Output Store 负�
 3. Discovery 识别目标 ASIC 工程。
 4. Config Loader 读取工程描述文件、caselist 和 submit JSON。
 5. Regression Planner 将输入展开为任务定义。
-6. Output Store 创建 regression 目录并快照配置。
-7. Scheduler 使用 simulator adapter 执行任务。
-8. 每个任务写入 log、wave、build 输出、状态和元数据。
-9. Report Generator 汇总完成后的 regression。
+6. Output Store 检查存储与目录归属、取得锁，并保存单跑或批次计划。
+7. 控制器按阶段编译或验证已有编译，通过 local/LSF 执行仿真及 hooks。
+8. 每个任务保存日志分析、结构化检查和 attempt 记录，完成事件更新终端 Dashboard。
+9. 全部任务取得终态后发布回归 state、报告和 final；独立单跑原子发布 run.json 的完成状态。状态未知时停止自动派发与终态发布。
 
 ## 可追溯模型
 
-每次 regression 应写入一个 `metadata.json` 记录，包含：
+当前按 case 与回归范围保存记录，不生成独立 `metadata.json`：
 
-- regression id
-- 工程名
-- 工程根目录
-- 工程 tag 或 commit
-- 当前工程使用的 `nsim` 版本
-- `nsim` 配置 hash
-- caselist hash
-- submit JSON hash
-- 调度器适配器
-- 仿真器适配器
-- 命令行调用
-- 环境摘要
-- 任务列表和最终状态
+| 文件 | 记录内容 |
+| --- | --- |
+| `run.json` | schema 2；每个 case 的身份、实际编译关联、完整 attempt 历史、分析摘要和校验；单跑内嵌 plan 与 state，回归 case 引用公共 record_dir |
+| `plan.json` | 回归/仅编译/预览的公共计划；单跑的对应内容在 run.json.plan |
+| `build.json` | 编译实例、配置/输入身份、命令、产物哈希、阶段与调度证据 |
+| `state.json` | 回归结束或异常停止时保存完整状态；运行中不按 case 全量重写 |
+| `live.json` | 有界的实时计数与近期变更；不包含全部任务与证据 |
+| `final.json` | 回归/仅编译最后发布的完成 manifest；单跑完成状态与分区校验内嵌 run.json |
 
-该元数据是 rerun 和 debug 的主要审计记录。Regression metadata 统一使用一个 schema version。长期存储先保持文件形式；只有当文件元数据和索引能力被证明不足时，才考虑引入数据库。
+新仿真记录不再生成独立的 analysis.json、attempt.json 或 records/ 下的 attempt 副本。result.json、hooks.json 与 LSF 协议文件仍承担工具交换/执行证据职责。仅编译命令保留原记录布局。读取兼容旧版分离记录；启动器可从单跑 run.json.plan 选择历史工具版本。
+
+记录各自带 schema/version 信息，不应假设所有文件使用同一个版本。rerun/recover 从校验通过的终态读取来源，长期存储仍保持文件形式。
 
 ## 任务身份、执行与结果契约
 
 ### 规划与编译身份
 
-Planner 在执行前生成稳定的 task id、有效 seed 和初始 attempt id，明确 compile → simulate 依赖。相同 submit 的 case 可以复用同一个受追踪 compile artifact；不同 submit 仍独立编译。编译元数据记录工程身份、输入 hash、工具版本、有效参数、Golden/参考模型是否启用及其身份；不得以当前 cache 目录是否存在推断旧二进制的能力。
+Planner 在执行前生成稳定的 task id、有效 seed 和编译身份，执行器在实际派发时生成新的 attempt id。相同 submit 的 case 可以复用同一个受追踪 compile artifact；不同 submit 仍独立编译。编译元数据记录输入 hash、有效编译配置与产物身份，build id 还绑定项目路径和工具代码。Golden/参考模型是否实际执行由结果协议确认，不能通过存在编译目录或配置开关推断。
 
-输入快照记录工程 commit/tag、dirty 状态、相关输入 hash、caselist、有效 submit、plusargs、工具与环境身份。源码引用必须可验证；输入已变化且无法取得原内容时，不能标为精确重跑。NSIM 不自动更新源码；调用工程构建入口时也必须禁止隐式拉取源码和清理既有回归。
+输入快照记录工程 commit/tag、dirty 状态、相关输入 hash、caselist、有效 submit、plusargs、工具与环境身份。源码引用必须可验证；输入已变化且无法取得原内容时，不能标为精确重跑。nsim 不自动更新源码；调用工程构建入口时也必须禁止隐式拉取源码和清理既有回归。
 
-保持现有输出根布局，build 按 submit/compile id 隔离，logs、waves、tasks 下按 task id/attempt id 隔离。名称由受控 id 映射，不能直接将不受校验的 case 名拼为路径。路径在配置加载时解析，改变工作目录后不丢失原含义。重跑和恢复均创建新 attempt，不覆盖旧结果；清理需确认产物不再被活动任务引用。
+顶层 submit_name 工作区用于单跑；回归的 submit 工作区放在 regr_dir/<regression-id>/ 内。
+回归计划与汇总统一放在 report/，失败重跑生成新回归 ID 并关联来源。目录选项不得逃出所属回归 submit，
+历史结果不覆盖。Report 按计划内任务和证据哈希校验，批次只汇总 batch plan 登记的回归，不扫描历史目录。
 
 ### 调度状态与结果判定
 
-调度状态表示 planned、queued、running、completed、failed、cancelled 等执行进度；检查 verdict 表示验证结果，两者独立记录。具体枚举和字段在相应实现阶段定稿。
+调度状态表示作业执行进度，检查 verdict 表示验证结果，两者独立记录。LSF 原始状态与未知作业处理见 [LSF 执行](lsf_execution.md)，PASS、NO_COMPARE、INCOMPLETE 等判定及优先级见 [结果协议](local_execution.md#result)。
 
 - Scheduler 显式保存 job id、执行节点、提交/启动/结束时间、退出码、启动 stderr 和失败原因；时间未知时保持未知，不从目录 mtime 伪造真实调度时间。
 - 本地调度采用有上限的滚动并发窗口；一个任务结束即补充下一个。单个 DUT 失败按策略处理，不阻塞无关任务。
@@ -176,46 +196,46 @@ Planner 在执行前生成稳定的 task id、有效 seed 和初始 attempt id�
 
 Report Generator 从持久化任务和检查结果生成 JSON 与面向人的 Markdown/静态 HTML。实时快照可显示排队/运行，但不得发布最终失败清单。最终结果和重跑清单引用同一已完成快照；采用单写者或有序发布，防止旧实时快照覆盖新终态。
 
+`dashboard.py` 由控制器单线程调用。case 分析和执行记录落盘后，完成回调唤醒控制器；LSF 状态事件也触发更新。维护增量计数，原子保存 schema 3 的有界 live.json 摘要后，直接重绘 stderr 上的终端面板；重定向时追加纯文本，stdout 的最终 JSON 保持原契约。无事件时不写盘、不重绘，没有 Dashboard 定时器、HTTP 服务或额外 job。final.json 发布后才显示整批判定；中断、异常和未知作业显示停止状态。HTML 只作为自包含的最终分页报告。见 [终端 Dashboard](dashboard.md)。
+
 Output Store 在同一文件系统内用唯一临时文件与原子替换发布完整文件。多文件结果以最后发布的完成 manifest 关联各文件身份/hash；任何必需文件发布失败，都不能将该批次标为完整。单文件原子替换不等价于多文件事务、断电持久性或备份。
 
 ### 重跑与恢复来源
 
 失败重跑从最终快照选取未满足该批策略的 task，保存 source regression/task/attempt，默认使用原 seed、有效 submit、plusargs 和可验证的工程/编译身份。用户更换 seed 或输入时必须记录差异。编译产物损坏时只能从可验证输入重新构建并记录新身份。
 
-重跑或基础设施重试不会删除原失败。自动重试必须有次数、时间预算及适用原因限制；未确认旧 job 已终止或取消时不得重叠启动副本，应保留未知状态并等待处置。
+重跑或基础设施重试通过 parent 引用和 attempt 记录保存来源；固定目录里的旧日志、结果和波形会被覆盖，单跑旧控制记录也随之替换，不能把溯源关系当作产物归档。自动重试有次数、时间预算及适用原因限制；未确认旧 job 已终止或取消时不得重叠启动副本。
 
 ## 存储与执行环境故障契约
 
-Storage 检查由 Output Store 提供，Scheduler 在实际执行节点启动任务前调用。检查输入、编译产物和输出路径的可见性与读写能力，采集节点、挂载/文件系统信息、可用字节、inode 和可获得的配额信息。无法查询的配额标记未知，不能报告已验证。阈值、重试预算及备用 output root 来自配置并纳入快照。
+`storage.py` 提供预检和复检，LSF worker 也在执行节点检查存储、输入与编译产物。预检记录主机、路径、设备号、可用字节和 inode，并进行小文件写入、readback 和 fsync。当前不查询配额，统一记录 `quota: unknown`；运行时返回的 EDQUOT 等错误另行分类。容量阈值、重试预算及备用 output root 纳入计划策略。
 
 LSF 队列配置必须表达或引用所需工具环境与存储条件；编译和仿真不要求同一主机，但执行环境必须兼容、产物必须一致可见。提交机上的文件检查不能替代执行节点检查；不把 `nightly` 或 `/space8` 写死为平台默认值。
 
 | 故障类别 | 检测与记录 | 处理与恢复条件 |
 |---|---|---|
-| 挂载缺失、权限不足、工具 loader 缺失 | 在执行节点检查并保存路径、节点、原始 stderr 与原因；不单凭 No such file 区分缺文件和 loader 问题 | 标记基础设施失败；隔离不兼容节点/配置，条件恢复或选择已配置兼容资源后才可新建 attempt |
+| 路径缺失、权限不足、命令启动失败 | 执行节点检查并保留路径、主机、异常及 stderr；不单凭 No such file 区分缺文件和 loader 问题 | 按实际异常记录存储、调度或执行失败；需要修改队列/工具配置时重新规划，当前不自动隔离集群节点 |
 | 磁盘空间、inode 或配额耗尽 | 启动前检查并识别运行中 ENOSPC/EDQUOT 等写入错误 | 暂停向受影响存储派发；保留可取得的证据，不自动删除旧回归；恢复空间后验证读写再继续 |
 | NFS 延迟、短暂不可用 | 将 job 完成与产物可见分开；记录有截止时间的重读与重试 | 缺失或不完整的必需产物均允许有限等待；超预算记为证据不完整/存储故障，不能无限等待或判 PASS |
 | 持续 I/O 错误、磁盘损坏 | 保存首次错误、受影响根目录和最后可信状态 | 隔离故障存储；在已配置健康根目录校验输入后创建新 attempt；原产物缺失标记丢失，不声称已经恢复 |
 | 截断日志、校验失败、发布失败 | 对照完成 manifest、检查器要求与 hash 验证证据 | 禁止完整通过；保留原故障，必要时从可信输入重跑 |
 
-存储故障还可能使故障记录本身无法写入原 output root。调度控制端应将最小事件（task/attempt、节点、路径、错误、时间）写入独立于该根目录的已配置健康事件目录；若也不可写，停止相关派发，以非零退出状态和 stderr 告知证据未持久化，不能假装记录成功。控制事件保持文件形式，不引入数据库。
+不再设置独立 event-root。运行计划、task/attempt、节点、路径、错误和时间等记录随 output 保存：启动时选择首个健康输出根，执行中该记录目录不可写则停止派发，以非零退出状态和 stderr 告知记录未持久化，不发布完成标记。备用输出只支持记录仍可写时的任务重试；不能保证整个记录盘失效后的自动恢复。所有记录保持文件形式，不引入数据库。
 
-默认恢复粒度为从输入重新运行一个 attempt，不承诺仿真进程断点续跑。故障范围按节点或存储根目录隔离；只有重新验证挂载、读写及容量后才能解除隔离。物理硬盘和文件系统修复、备份管理由基础设施负责；NSIM 负责检测、隔离、证据状态与受控重跑。
+默认恢复粒度为从输入重新运行一个 attempt，不承诺仿真进程断点续跑。本次运行按输出根隔离存储故障，不自动解除隔离；之后显式 recover 会重新检查所选存储。节点选择由 LSF 队列与资源配置控制，当前没有自动节点黑名单。物理硬盘、文件系统修复和备份管理由基础设施负责。
 
-## Architecture Assumptions
+## 架构约束与后续验证
 
 - `nsim` 以 Python CLI 工具形态交付，而不是服务端平台或 Web 应用。
 - ASIC 工程通过明确的工程描述文件被发现和识别。
 - `nsim` 工具、ASIC 工程源码和仿真输出目录彼此独立。
 - 不同 ASIC 工程可以使用不同版本的 `nsim`。
-- 初期使用 fake simulator 和本地多进程调度验证核心流程。
+- 使用 fake、command 和本地进程级 LSF 服务验证共用流程。
 - VCS、Verdi 和 LSF 通过 adapter 接入，不进入 CLI 业务逻辑。
 - DPI 编译使用工程提供的独立 Makefile，产物以 `.so` 形式存在。
 - Regression metadata 初期使用文件形式存储。
 
-## Architecture Open Questions
-
-- None
+真实 farm 上的路径、跨主机锁、工具/Python 环境和故障行为仍需验收；原生 EDA 执行及归档策略的后续工作见 [待办](backlog.md)。
 
 ## 错误处理
 
@@ -249,8 +269,13 @@ LSF 队列配置必须表达或引用所需工具环境与存储条件；编译�
 后续测试须使用受控 fake fixture 或故障注入，不破坏真实磁盘：
 
 - 退出码为零但比较未发生、缺结束记录、必需指标缺失，均不能成为有效通过；功能和性能任一失败均保留。
-- 同 case 的多 submit、多 seed、多 attempt 并行不覆盖；慢任务不会使其它空闲槽停顿。
+- 不同 submit、case、seed 可并行；同一目录禁止并行覆盖，串行新运行替换旧产物；慢任务不会使其它空闲槽停顿。
 - 实时与最终报告并发发布、日志延迟出现/截断、报告写入失败，不能产生错误最终快照或重跑清单。
 - 模拟挂载不可见、只读路径、空间/inode/配额不足、I/O 错误，确认故障分类、派发隔离和有界等待；真实 LSF 环境再验证执行节点差异。
 - 故障存储与健康存储并存，健康任务继续；源输入变化、损坏或旧 job 状态未知时拒绝盲目恢复。
 - 原 seed 与输入身份重跑可追溯；备用存储恢复创建新 attempt，保留原失败和丢失证据标记。
+
+`batch.py` 复用 CLI 的 prepare_execution，将 regression list 全部行预先规划后顺序执行。
+子控制器事件驱动批次状态、Dashboard 和报告更新；未知作业状态阻断后续行。详见 [批量回归](regression_batches.md)。
+
+正常回归 case 的 run.json 在开始和 attempt 结束各发布一次；单跑还在控制器完成时发布最终状态。JSON 从内存序列化后原子替换，并直接使用已写字节的哈希，避免为获取该哈希再读文件。日志沿用阶段扫描得到的哈希，终态/显式查询仍执行证据校验。批量回归的子任务进度只更新当前行与总计，不重写全部批次状态；完整批次记录在回归行边界和结束/异常时保存。

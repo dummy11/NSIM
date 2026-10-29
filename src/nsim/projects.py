@@ -11,6 +11,7 @@ import subprocess
 
 from packaging.version import InvalidVersion, Version
 
+from nsim.cli_aliases import add_argument, add_command
 from nsim.config import Project, load_project, name
 from nsim.project_paths import (ProjectError, descriptor_path, find_root, load_registry,
                                marker, read_pin, registry_path, resolve_root)
@@ -19,6 +20,14 @@ from nsim.storage import atomic_write, encode
 SIM_HEADER = '# NSIM managed source map v1; compiled filelist is frozen per run.\n'
 TB_TEMPLATE = '# Verification sources, relative to the verification root.\n'
 EDIT_FIELDS = ('rtl_root', 'rtl_filelist', 'verification_filelist')
+STORAGE_FIELDS = ('output_roots',)
+
+
+def storage_changes(options):
+    changes = {}
+    if options.output_root is not None:
+        changes['output_roots'] = [Path(p).expanduser().resolve() for p in options.output_root]
+    return changes
 
 
 def installation_root():
@@ -132,17 +141,42 @@ def _restore(transaction):
         check_destination(Path(directory))
     for item in reversed(transaction['files']):
         path = Path(item['path'])
+        if path == transaction_guard(Path(transaction['root'])):
+            continue  # Keep other users blocked until the private journal is removed.
         if item['before'] is None:
             path.unlink(missing_ok=True)
         else:
             atomic_write(path, base64.b64decode(item['before']))
-    for directory in reversed(transaction['directories']):
+    remove_empty_directories(transaction['directories'])
+
+
+def remove_empty_directories(directories):
+    for directory in reversed(directories):
         path = Path(directory)
         if path.exists():
             try:
                 path.rmdir()
             except OSError:
                 pass  # Preserve files not created by this transaction.
+
+
+def transaction_guard(root):
+    return root / '.nsim' / 'project.transaction.json'
+
+
+def finish_transaction(pending, transaction):
+    # A crash after removing the private journal leaves a committed/rolled-back
+    # guard that its originating registry can safely finalize on the next call.
+    pending.unlink()
+    guard = transaction_guard(Path(transaction['root']))
+    guard.unlink(missing_ok=True)
+    remove_guard_directories(guard, transaction['directories'])
+
+
+def remove_guard_directories(guard, directories):
+    # Only these directories may have survived rollback because of the guard.
+    # Successful bootstrap must retain empty submit/ and other requested dirs.
+    remove_empty_directories([p for p in directories if Path(p) in guard.parents])
 
 
 @contextmanager
@@ -160,35 +194,72 @@ def registry_lock(write=False):
                 raise ProjectError('interrupted project update; rerun bootstrap/update to recover before querying')
             transaction = read_transaction(pending)
             root = Path(transaction['root'])
-            with project_lock(root):
+            with project_lock(root, recovering=True):
                 _restore(transaction)
-            pending.unlink()
+                finish_transaction(pending, transaction)
         yield
 
 
 @contextmanager
-def project_lock(root):
+def project_lock(root, recovering=False):
     # flock the nearest existing directory, without creating a lock inside user sources.
     directory = root
     while not directory.exists():
         directory = directory.parent
-    fd = os.open(directory, os.O_RDONLY)
+    descriptors = []
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        # Also lock ancestors: a bootstrap locking the nearest existing parent
+        # must remain visible after it creates the previously absent root.
+        for location in (*reversed(directory.parents), directory):
+            fd = os.open(location, os.O_RDONLY)
+            descriptors.append(fd)
+            fcntl.flock(fd, fcntl.LOCK_EX if location == directory else fcntl.LOCK_SH)
+        guard = transaction_guard(root)
+        if os.path.lexists(guard):
+            check_destination(guard)
+            try:
+                data = json.loads(guard.read_text())
+                directories = data['directories']
+                if (data.get('schema_version') != 1 or not isinstance(directories, list)
+                        or any(not isinstance(p, str) or not Path(p).is_absolute() or
+                               (Path(p) != root and root not in Path(p).parents and Path(p) not in root.parents)
+                               for p in directories)):
+                    raise ValueError('invalid shared transaction marker')
+                if data['registry'] != str(registry_path()):
+                    raise ProjectError(f'interrupted project update from another user/registry: {root}; '
+                                       'the original user must rerun bootstrap/update to recover')
+                pending = registry_path().parent / 'projects.transaction.json'
+                if pending.exists():
+                    if not recovering:
+                        raise ProjectError(f'interrupted project update: {root}; rerun bootstrap/update to recover')
+                else:
+                    for value in directories:
+                        check_destination(Path(value))
+                    guard.unlink()
+                    # Keep the root inode locked for this caller, which may
+                    # immediately bootstrap it again after a rolled-back create.
+                    remove_guard_directories(guard, [p for p in directories if root in Path(p).parents])
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                raise ProjectError(f'interrupted project update at {root}: {exc}') from exc
         yield
     finally:
-        os.close(fd)
+        for fd in reversed(descriptors):
+            os.close(fd)
 
 
 def publish(root, files, directories=()):
+    files = dict(files)
+    guard = transaction_guard(root)
     needed = set()
-    for directory in [*directories, *(p.parent for p in files)]:
+    for directory in [*directories, guard.parent, *(p.parent for p in files)]:
         while not directory.exists():
             needed.add(directory)
             directory = directory.parent
         if not directory.is_dir():
             raise ProjectError(f'not a directory: {directory}')
     created = sorted(needed, key=lambda p: len(p.parts))
+    files = {guard: encode({'schema_version': 1, 'registry': str(registry_path()),
+                           'directories': [str(p) for p in created]}), **files}
     transaction = {'schema_version': 1, 'root': str(root), 'directories': [str(p) for p in created], 'files': []}
     for path, content in files.items():
         check_destination(path)
@@ -207,9 +278,9 @@ def publish(root, files, directories=()):
             atomic_write(path, content)
     except BaseException:
         _restore(transaction)
-        pending.unlink()
+        finish_transaction(pending, transaction)
         raise
-    pending.unlink()
+    finish_transaction(pending, transaction)
 
 
 def validate_project(project, missing_tb=None):
@@ -230,6 +301,8 @@ def config_bytes(project):
     values = {'schema_version': 2, 'name': project.name,
               **{key: relative(getattr(project, key)) for key in EDIT_FIELDS},
               'inputs': [relative(p) for p in project.inputs]}
+    if project.output_roots:
+        values['output_roots'] = [relative(p) for p in project.output_roots]
     return ('\n'.join(f'{k} = {json.dumps(v, ensure_ascii=False)}' for k, v in values.items()) + '\n').encode()
 
 
@@ -285,6 +358,9 @@ def bootstrap(options):
                     value = getattr(options, key)
                     if value is not None and Path(value).expanduser().resolve() != getattr(project, key):
                         raise ProjectError('configuration differs; register existing configuration first, then use nsim update')
+                for key, value in storage_changes(options).items():
+                    if value != getattr(project, key):
+                        raise ProjectError('storage configuration differs; use nsim update')
                 pin = read_pin(root)
                 if options.nsim_version is not None and select_version(options.nsim_version) != pin:
                     raise ProjectError('version differs; use nsim switch or nsim update --nsim-version')
@@ -301,17 +377,28 @@ def bootstrap(options):
                 tb = Path(options.verification_filelist).expanduser().resolve() if options.verification_filelist else root / 'filelist' / 'tb.f'
                 project = Project(root / '.nsim' / 'nsim.toml', project_name, [], root, 2,
                                   Path(options.rtl_root).expanduser().resolve(),
-                                  Path(options.rtl_filelist).expanduser().resolve(), tb)
+                                  Path(options.rtl_filelist).expanduser().resolve(), tb,
+                                  **storage_changes(options))
                 validate_project(project, missing_tb=tb if options.verification_filelist is None else None)
                 files = {project.descriptor: config_bytes(project), root / '.nsim' / '.nsim_version': (pin + '\n').encode()}
                 if options.verification_filelist is None and not tb.exists():
                     files[tb] = TB_TEMPLATE.encode()
                 check_map(root / 'filelist' / 'sim.f')
                 files[root / 'filelist' / 'sim.f'] = sim_bytes(project)
-                directories = [root / 'submit', root / 'filelist']
+                from nsim.submit_templates import scaffold
+                from nsim.caselist_templates import scaffold as case_scaffold
+                directories = [root / 'submit', root / 'submit' / 'common', root / 'filelist', root / 'caselist']
                 for directory in directories:
                     if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
                         raise ProjectError(f'expected a real directory: {directory}')
+                for folder, templates in (('submit', scaffold()), ('caselist', case_scaffold())):
+                    for relative, content in templates.items():
+                        destination = root / folder / relative
+                        check_destination(destination)
+                        if not destination.exists():
+                            files[destination] = content.encode('utf-8')
+                        elif not destination.is_file():
+                            raise ProjectError(f'expected a {folder} file: {destination}')
             registry['projects'].append({'name': project.name, 'root': str(root), 'descriptor': str(project.descriptor)})
             files[registry_path()] = encode(registry)
             publish(root, files, directories)
@@ -319,8 +406,9 @@ def bootstrap(options):
 
 
 def update(options):
-    if not any(getattr(options, key) is not None for key in (*EDIT_FIELDS, 'nsim_version')):
-        raise ProjectError('provide --rtl-root, --rtl-filelist, --verification-filelist or --nsim-version; no changes made')
+    if not any(getattr(options, key) is not None for key in (*EDIT_FIELDS, 'nsim_version', 'output_root')):
+        raise ProjectError('provide --rtl-root, --rtl-filelist, --verification-filelist, --nsim-version, '
+                           'or --output-root; no changes made')
     with registry_lock(write=True):
         root = resolve_root(options.project)
         registry = load_registry()
@@ -335,6 +423,7 @@ def update(options):
                 raise ProjectError('registration does not match project configuration')
             before = project_info(root, registry)
             changes = {key: Path(getattr(options, key)).expanduser().resolve() for key in EDIT_FIELDS if getattr(options, key) is not None}
+            changes.update(storage_changes(options))
             revised = replace(project, **changes)
             validate_project(revised)
             files = {}
@@ -342,8 +431,9 @@ def update(options):
                 if project.descriptor.suffix != '.toml':
                     raise ProjectError('schema 2 updates require nsim.toml')
                 files[project.descriptor] = config_bytes(revised)
-                check_map(root / 'filelist' / 'sim.f')
-                files[root / 'filelist' / 'sim.f'] = sim_bytes(revised)
+                if any(key in changes for key in EDIT_FIELDS):
+                    check_map(root / 'filelist' / 'sim.f')
+                    files[root / 'filelist' / 'sim.f'] = sim_bytes(revised)
             pin = root / '.nsim' / '.nsim_version'
             if options.nsim_version is not None:
                 selected = select_version(options.nsim_version)
@@ -370,6 +460,7 @@ def project_info(root, registry=None):
             issues.append('registration does not match project configuration')
         if project.schema_version == 2:
             result.update({key: str(getattr(project, key)) for key in EDIT_FIELDS})
+            result['output_roots'] = [str(p) for p in project.output_roots]
             try:
                 validate_project(project)
             except (OSError, ValueError) as exc:
@@ -421,23 +512,26 @@ def list_projects():
 
 
 def add_commands(commands):
-    boot = commands.add_parser('bootstrap', help='initialize and register a verification project')
-    boot.add_argument('--name')
-    boot.add_argument('--verification-root', type=Path)
+    boot = add_command(commands, 'bootstrap', help='initialize and register a verification project')
+    add_argument(boot, '--name')
+    add_argument(boot, '--verification-root', type=Path)
     for key in (*EDIT_FIELDS, 'nsim_version'):
-        boot.add_argument('--' + key.replace('_', '-'))
-    edit = commands.add_parser('update', help='update registered project configuration')
-    edit.add_argument('--project')
+        add_argument(boot, '--' + key.replace('_', '-'))
+    edit = add_command(commands, 'update', help='update registered project configuration')
+    add_argument(edit, '--project')
     for key in (*EDIT_FIELDS, 'nsim_version'):
-        edit.add_argument('--' + key.replace('_', '-'))
-    switch = commands.add_parser('switch', help='alias of update --nsim-version')
-    switch.add_argument('version')
-    switch.add_argument('--project')
-    inspect = commands.add_parser('status', help='show the current project, including configuration problems')
-    inspect.add_argument('--project')
-    listing = commands.add_parser('list', help='list all projects registered for this user')
+        add_argument(edit, '--' + key.replace('_', '-'))
+    for parser in (boot, edit):
+        add_argument(parser, '--output-root', action='append', type=Path,
+                            help='save a default output root; repeat to replace the fallback list')
+    switch = add_command(commands, 'switch', help='alias of update --nsim-version')
+    add_argument(switch, 'version')
+    add_argument(switch, '--project')
+    inspect = add_command(commands, 'status', help='show the current project, including configuration problems')
+    add_argument(inspect, '--project')
+    listing = add_command(commands, 'list', help='list all projects registered for this user')
     for parser in (boot, edit, switch, inspect, listing):
-        parser.add_argument('--json', action='store_true')
+        add_argument(parser, '--json', action='store_true')
 
 
 def dispatch(options):
@@ -448,6 +542,7 @@ def dispatch(options):
             options.nsim_version = options.version
             for key in EDIT_FIELDS:
                 setattr(options, key, None)
+            options.output_root = None
         value = update(options)
     elif options.command == 'list':
         value = list_projects()
@@ -463,7 +558,7 @@ def dispatch(options):
         if 'action' in value:
             print(value['action'].replace('_', ' '))
         if 'before' in value:
-            for key in (*EDIT_FIELDS, 'nsim_version'):
+            for key in (*EDIT_FIELDS, *STORAGE_FIELDS, 'nsim_version'):
                 if value['before'].get(key) != value['project'].get(key):
                     print(f"{key}: {value['before'].get(key)} -> {value['project'].get(key)}")
         p = value.get('project', value)

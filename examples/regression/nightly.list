@@ -1,0 +1,4 @@
+# Run from the NSIM repository root with:
+# nsim regr --project examples/projects/fake -rl examples/regression/nightly.list -o /tmp/nsim-output
+-sub examples/projects/fake/pass.json -l examples/projects/fake/smoke.caselist -seed 42 -jobs 2 --plusargs +TRACE=0
+-sub examples/projects/fake/pass.json -l examples/projects/fake/smoke.caselist -seed 42 -jobs 2 --plusargs +TRACE=1

@@ -29,7 +29,7 @@ class EdaPreviewTests(Fixture):
     def test_preview_resolves_sources_and_fixed_wave_without_execution(self):
         plan = self.plan(allow_missing_tools=True)
         with patch('subprocess.Popen', side_effect=AssertionError('must not execute')):
-            journal, state = run(plan, [self.out], self.events, dry_run=True)
+            journal, state = run(plan, [self.out], dry_run=True)
         preview = json.loads((journal / 'commands.json').read_text())
         task = preview['tasks'][0]
         self.assertFalse(preview['executed'])
@@ -37,17 +37,30 @@ class EdaPreviewTests(Fixture):
         self.assertFalse((journal / 'final.json').exists())
         self.assertIn(str(self.project / 'src' / 'dut.sv'), task['compile']['argv'])
         self.assertIn('+ntb_random_seed=42', task['simulate'])
+        compile_argv = task['compile']['argv']
+        self.assertEqual(compile_argv[compile_argv.index('-l') + 1], str(Path(task['build_dir']) / 'vcs.log'))
+        self.assertEqual(task['simulate'][task['simulate'].index('-l') + 1], str(Path(task['cwd']) / 'sim.log'))
         self.assertEqual(task['wave'], str(Path(task['cwd']) / 'acc.fsdb'))
         self.assertEqual(task['verdi']['argv'][-1], task['wave'])
         self.assertIn(str(self.project / 'src' / 'defs.svh'), plan['input_hashes'])
         self.assertEqual(len(task['unresolved_tools']), 4)
         self.assertNotIn('-q', task['scheduler']['submit_argv'])
 
+    def test_native_log_flag_cannot_overwrite_stage_transcript(self):
+        for key, target in (('compile_args', 'compile.log'), ('run_args', 'run.log')):
+            with self.subTest(key=key):
+                self.data['vcs'][key] = ['-l', target]
+                self.save_submit()
+                plan = self.plan(allow_missing_tools=True)
+                with self.assertRaisesRegex(ConfigError, 'VCS -l is managed'):
+                    commands(plan, plan['tasks'][0], self.out)
+                self.data['vcs'][key] = []
+
     def test_native_execution_rejected_before_journal_creation(self):
         plan = self.plan(allow_missing_tools=True)
         with self.assertRaisesRegex(ConfigError, 'unresolved tools'):
-            run(plan, [self.out], self.events)
-        self.assertEqual(list(self.events.iterdir()), [])
+            run(plan, [self.out])
+        self.assertEqual(list(self.out.iterdir()), [])
 
     def test_real_plan_requires_tools(self):
         with self.assertRaisesRegex(ConfigError, 'executable unavailable'):
@@ -112,3 +125,22 @@ class EdaPreviewTests(Fixture):
         from nsim.planning import create_plan
         plan = create_plan(descriptor, cases=['smoke'], submit_paths=[self.submit], seeds=[42], allow_missing_tools=True)
         self.assertEqual(plan['project']['root'], str(self.project))
+
+    def test_gate_stage_previews_and_compile_arguments_independent_of_case(self):
+        from nsim.planning import create_plan
+        self.data['mode'] = 'gate'
+        self.save_submit()
+        for phase in ('com', 'sim', 'run'):
+            selection = {} if phase == 'com' else {'cases': ['smoke'], 'seeds': [42]}
+            plan = create_plan(self.project, submit_paths=[self.submit], phase=phase, mode='gate',
+                               directory='issue', com_dir='../gate/com_dir', allow_missing_tools=True, **selection)
+            record, _ = run(plan, [self.out], dry_run=True)
+            preview = json.loads((record / 'commands.json').read_text())['tasks'][0]
+            self.assertEqual('compile' in preview, phase != 'sim')
+            self.assertEqual('simulate' in preview, phase != 'com')
+            self.assertEqual(preview['build_dir'], str(self.out / 'native/gate/com_dir'))
+            self.assertFalse((self.out / 'native').exists())
+        self.data['vcs']['compile_args'] = ['+define+CASE={case}']
+        self.save_submit()
+        with self.assertRaisesRegex(ConfigError, 'cannot depend on case'):
+            create_plan(self.project, submit_paths=[self.submit], phase='com', mode='gate', allow_missing_tools=True)

@@ -231,6 +231,10 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
         compile_config['hooks'] = {key: submit['hooks'][key] for key in ('pre_compile', 'post_compile')}
         compile_config['log_analysis'] = {key: submit['log_analysis'][key] for key in
                                           ('compile_files', 'max_diagnostics', 'max_scan_bytes', 'settle_seconds')}
+        filter_data = submit['log_analysis']['error_filter']
+        compile_config['log_analysis']['error_filter_rules'] = (
+            [{key: value for key, value in rule.items() if key != 'number'}
+             for rule in filter_data['rules'] if rule['phase'] == 'compile'] if filter_data else [])
         if submit['adapter'] == 'command' and not submit.get('compile'):
             compile_config['prebuilt_argv'] = submit['argv']
         if submit['adapter'] == 'vcs':

@@ -20,12 +20,13 @@ LOCATION = re.compile(r'"([^"\n]+)"\s*,\s*(\d+)|\b([^\s,()]+\.(?:svh?|vh?|vhd|vh
 
 
 def config(value):
-    fields(value, {'files', 'compile_files', 'max_diagnostics', 'max_scan_bytes', 'settle_seconds'}, set(), 'log_analysis')
+    fields(value, {'files', 'compile_files', 'max_diagnostics', 'max_scan_bytes', 'settle_seconds', 'error_filter'}, set(), 'log_analysis')
     result = dict(files=strings(value.get('files', ['run.log']), 'log_analysis.files', True),
                   compile_files=strings(value.get('compile_files', ['compile.log']), 'compile_files', True),
                   max_diagnostics=integer(value.get('max_diagnostics', 100), 'max_diagnostics', 1, 10000),
                   max_scan_bytes=integer(value.get('max_scan_bytes', 1024 ** 3), 'max_scan_bytes', 1),
-                  settle_seconds=number(value.get('settle_seconds', .5), 'log_analysis.settle_seconds'))
+                  settle_seconds=number(value.get('settle_seconds', .5), 'log_analysis.settle_seconds'),
+                  error_filter=value.get('error_filter'))
     for key in ('files', 'compile_files'):
         result[key] = list(dict.fromkeys(result[key]))
         for item in result[key]:
@@ -34,6 +35,11 @@ def config(value):
                 raise ConfigError(f'{key}: log must be a relative path inside the stage directory: {item}')
             if path.name in {'log_analysis.json', 'analysis.json', 'run.json', 'hooks.json'}:
                 raise ConfigError(f'{key}: analysis output cannot be its own input')
+    if result['error_filter'] is not None:
+        from nsim.error_filter import validate_logs
+        if not isinstance(result['error_filter'], dict) or not {'path', 'sha256', 'rules'} <= result['error_filter'].keys():
+            raise ConfigError('error_filter must name a valid rule file in submit')
+        validate_logs(result['error_filter'], result)
     return result
 
 
@@ -110,19 +116,43 @@ def empty_report(phase, task, custom=False):
               'seed': task['seed'] if phase == 'simulate' else None, 'complete': True,
               'analyzer': 'custom' if custom else 'vcs_uvm', 'host': socket.gethostname(), 'pid': os.getpid(),
               'counts': dict.fromkeys(SEVERITIES, 0), 'diagnostics': [], 'files': [], 'issues': [],
-              'diagnostics_truncated': 0, 'first_failure': None}
+              'diagnostics_truncated': 0, 'first_failure': None,
+              'blocking_counts': {'error': 0, 'fatal': 0}, 'waived_counts': {'error': 0, 'fatal': 0},
+              'first_blocking': None, 'waivers': [], 'waivers_truncated': 0}
 
 
 def scan(work, settings, phase, task, cancel=None, custom=None):
     """Scan at most max_scan_bytes with bounded line/context storage; hash in the same pass."""
     work = Path(work)
     result = empty_report(phase, task, custom is not None)
+    filter_data = settings.get('error_filter')
+    result['error_filter_sha256'] = filter_data['sha256'] if filter_data else None
     remaining = settings['max_scan_bytes']
     evidence = {}
 
-    def emit(item):
+    def emit(item, occurrences=1):
         if item['severity'] in ('error', 'fatal') and result['first_failure'] is None:
             result['first_failure'] = item
+        if item['severity'] in ('error', 'fatal'):
+            from nsim.error_filter import match
+            try:
+                source = Path(item['log_file'])
+                log_file = str(source.relative_to(work)) if source.is_absolute() else str(source)
+            except (KeyError, ValueError):
+                log_file = None
+            rule = match(filter_data, phase, log_file, item) if filter_data and occurrences == 1 else None
+            if rule:
+                result['waived_counts'][item['severity']] += 1
+                if len(result['waivers']) < 8:
+                    result['waivers'].append(dict(rule=rule['number'], code=item['code'],
+                                                  log_file=log_file, log_line=item.get('log_line'),
+                                                  reason=rule['reason']))
+                else:
+                    result['waivers_truncated'] += 1
+            else:
+                result['blocking_counts'][item['severity']] += occurrences
+                if result['first_blocking'] is None:
+                    result['first_blocking'] = item
         if len(result['diagnostics']) < settings['max_diagnostics']:
             result['diagnostics'].append(item)
         else:
@@ -203,7 +233,8 @@ def scan(work, settings, phase, task, cancel=None, custom=None):
                     result['counts'][severity] += counts[severity] + max(uvm_counts[severity], summaries[severity])
                     if summaries[severity] > uvm_counts[severity]:
                         emit(dict(severity=severity, code='UVM_SUMMARY', log_file=str(path),
-                                  log_line=summary_lines[severity], message=f'UVM {severity} count {summaries[severity]}; individual messages not all present'))
+                                  log_line=summary_lines[severity], message=f'UVM {severity} count {summaries[severity]}; individual messages not all present'),
+                             summaries[severity] - uvm_counts[severity])
                 entry['complete'] = (entry['bytes'] == before.st_size and
                                      (before.st_size, before.st_mtime_ns, before.st_ino) ==
                                      (after.st_size, after.st_mtime_ns, after.st_ino))
@@ -219,9 +250,14 @@ def scan(work, settings, phase, task, cancel=None, custom=None):
         result['counts'] = custom['counts']
         for item in custom['diagnostics']:
             emit(item)
-    result['failure_reason'] = (result['first_failure']['message'] if result['first_failure'] else
+        for severity in ('error', 'fatal'):
+            undisclosed = custom['counts'][severity] - result['blocking_counts'][severity] - result['waived_counts'][severity]
+            result['blocking_counts'][severity] += max(0, undisclosed)
+            if undisclosed > 0 and result['first_blocking'] is None:
+                result['first_blocking'] = dict(severity=severity, message='custom analysis did not include every diagnostic')
+    result['failure_reason'] = (result['first_blocking']['message'] if result['first_blocking'] else
                                 next(iter(result['issues']), 'log analysis incomplete' if not result['complete'] else
-                                     'log errors reported' if result['counts']['error'] + result['counts']['fatal'] else 'no log errors'))
+                                     'all log errors waived' if result['waived_counts']['error'] else 'no log errors'))
     return result, evidence
 
 
@@ -241,7 +277,12 @@ def first_location(diagnostic):
 def brief(report, path):
     return dict(complete=report['complete'], counts=report['counts'],
                 first_failure=first_location(report['first_failure']),
+                first_blocking=first_location(report.get('first_blocking')),
                 failure_reason=short_reason(report['failure_reason']),
+                blocking_counts=report.get('blocking_counts', {'error': report['counts']['error'], 'fatal': report['counts']['fatal']}),
+                waived_counts=report.get('waived_counts', {'error': 0, 'fatal': 0}),
+                waivers=report.get('waivers', []), waivers_truncated=report.get('waivers_truncated', 0),
+                error_filter_sha256=report.get('error_filter_sha256'),
                 analyzer=report['analyzer'], path=str(path))
 
 
@@ -249,13 +290,26 @@ def case_summary(task, attempt):
     """Public case result, independent of diagnostic count and log volume."""
     reports = {'compile': attempt.get('compile_log_analysis'), 'simulation': attempt.get('log_analysis')}
     first_error = None
+    first_blocking = None
     for phase, report in reports.items():
         if report and report['counts']['error'] + report['counts']['fatal']:
             location = first_location(report.get('first_failure'))
             if location:
                 first_error = dict(phase=phase, **location)
             break
+    for phase, report in reports.items():
+        if report and report.get('first_blocking'):
+            location = first_location(report['first_blocking'])
+            if location:
+                first_blocking = dict(phase=phase, **location)
+            break
     return dict(schema_version=3, case=task['case'], seed=task['seed'],
-                verdict=attempt['verdict'], reason=short_reason(attempt.get('reason')), first_error=first_error,
+                verdict=attempt['verdict'], reason=short_reason(attempt.get('reason')),
+                first_error=first_error, first_blocking=first_blocking,
+                result_verdict=attempt.get('result_verdict'), result_reason=short_reason(attempt.get('result_reason')),
                 counts={phase: report['counts'] if report else None for phase, report in reports.items()},
+                blocking_counts={phase: report.get('blocking_counts') if report else None for phase, report in reports.items()},
+                waived_counts={phase: report.get('waived_counts') if report else None for phase, report in reports.items()},
+                waivers={phase: report.get('waivers', []) if report else [] for phase, report in reports.items()},
+                error_filter_sha256={phase: report.get('error_filter_sha256') if report else None for phase, report in reports.items()},
                 scan_complete={phase: report['complete'] if report else None for phase, report in reports.items()})

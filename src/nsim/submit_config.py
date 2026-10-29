@@ -52,6 +52,12 @@ def anchor_tools(data, directory):
         for value in hooks.values():
             for hook in value if isinstance(value, list) else [value]:
                 command(hook, 'argv')
+    analysis = data.get('log_analysis')
+    if isinstance(analysis, dict) and isinstance(analysis.get('error_filter'), str):
+        reference = analysis['error_filter']
+        if not reference.strip() or '\0' in reference:
+            raise ConfigError('log_analysis.error_filter must be a non-empty file path')
+        analysis['error_filter'] = str((directory / reference).resolve())
     return data
 
 
@@ -88,6 +94,22 @@ def resolve_submit(path, source_bytes=None, *, file_contents=None):
         anchor_tools(parent, parent_path.parent)
         sources[str(parent_path)] = parent_content
     sources[str(path)] = content
+    result = merge(parent, anchor_tools(child, path.parent))
+    analysis = result.get('log_analysis')
+    if isinstance(analysis, dict) and 'error_filter' in analysis:
+        from nsim.error_filter import load
+        reference = analysis['error_filter']
+        if not isinstance(reference, str) or not reference.strip() or '\0' in reference:
+            raise ConfigError('log_analysis.error_filter must be a non-empty file path')
+        rule_path = Path(reference)
+        if rule_path.is_symlink() or not rule_path.is_file():
+            raise ConfigError(f'error_filter must be a regular file: {rule_path}')
+        try:
+            rule_bytes = file_contents[str(rule_path)] if file_contents and str(rule_path) in file_contents else rule_path.read_bytes()
+        except OSError as exc:
+            raise ConfigError(f'cannot read error_filter {rule_path}: {exc}') from exc
+        analysis['error_filter'] = load(rule_path, rule_bytes)
+        sources[str(rule_path)] = rule_bytes
     if source_bytes is not None:
         source_bytes.update(sources)
-    return merge(parent, anchor_tools(child, path.parent))
+    return result

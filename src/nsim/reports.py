@@ -148,7 +148,7 @@ def markdown(state, verify=True):
              "|---|---|---|---|---|"]
     for task in state["tasks"]:
         lines.append(f"| {task['case']} | {task['submit_name']} | {task['seed']} | {task['effective_verdict']} | {len(task['attempts'])} |")
-    lines.extend(['', '| Case / seed | Log errors / fatals | First location | Failure reason |', '|---|---|---|---|'])
+    lines.extend(['', '| Case / seed | Log errors / fatals | Waived errors | First location | Failure reason |', '|---|---|---|---|---|'])
     def cell(value):
         return str(value or '').replace('|', '\\|').replace('\n', ' ')[:2048]
     for task in state['tasks']:
@@ -156,12 +156,13 @@ def markdown(state, verify=True):
             continue
         attempt = task['attempts'][-1]
         report = attempt.get('log_analysis') or attempt.get('compile_log_analysis')
-        first = (report or {}).get('first_failure') or {}
+        first = (report or {}).get('first_blocking') or (report or {}).get('first_failure') or {}
         where = (str(first.get('source_file', '')) + ':' + str(first.get('source_line', ''))).strip(':')
         if not where and first.get('log_file'):
             where = first['log_file'] + ':' + str(first.get('log_line', ''))
         counts = report['counts'] if report else {}
-        lines.append(f"| {task['case']} / {task['seed']} | {counts.get('error', 0)} / {counts.get('fatal', 0)} | {cell(where)} | {cell(attempt.get('reason'))} |")
+        waived = (report or {}).get('waived_counts', {}).get('error', 0)
+        lines.append(f"| {task['case']} / {task['seed']} | {counts.get('error', 0)} / {counts.get('fatal', 0)} | {waived} | {cell(where)} | {cell(attempt.get('reason'))} |")
     lines.extend(['', 'Log totals (shared compilation counted once): ' + str(state['log_summary'])])
     if state["report_errors"]:
         lines.extend(["", "Report publication errors:", "", *[f"- {e}" for e in state["report_errors"]]])

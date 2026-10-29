@@ -109,16 +109,18 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
             operation = 'result_evaluation'
             attempt.update(evaluate(result, task, submit["required_checks"], attempt['exit_code'],
                                     timed_out, submit["settle_seconds"], cancel))
+        attempt['result_verdict'] = attempt['verdict']
+        attempt['result_reason'] = attempt['reason']
         analysis = attempt.get('log_analysis')
         if analysis:
-            errors = analysis['counts']['error'] + analysis['counts']['fatal']
-            if errors:
-                attempt['result_reason'] = attempt['reason']
-                attempt['reason'] += ' | log: ' + analysis['failure_reason']
-                if attempt['verdict'] not in {'TIMEOUT', 'CRASH', 'CANCELLED', 'HOOK_FAIL'}:
-                    attempt['verdict'] = 'FAIL'
-            elif not analysis['complete'] and attempt['verdict'] in ACCEPTED:
+            blocking = analysis.get('blocking_counts', analysis['counts'])
+            errors = blocking['error'] + blocking['fatal']
+            if not analysis['complete'] and attempt['verdict'] in ACCEPTED:
                 attempt.update(verdict='INCOMPLETE', reason=analysis['failure_reason'])
+            elif errors:
+                attempt['reason'] += ' | log: ' + analysis['failure_reason']
+                if attempt['verdict'] in ACCEPTED:
+                    attempt['verdict'] = 'FAIL'
         elif attempt['verdict'] in ACCEPTED:
             attempt.update(verdict='INCOMPLETE', reason='log analysis unavailable')
         check_identity(plan)

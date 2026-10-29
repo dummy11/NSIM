@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from nsim.log_analysis import brief, case_summary, config, scan, validate_custom, wait_stable
+from nsim.error_filter import load as load_filter
 from nsim.config import ConfigError
 from nsim.storage import digest
 
@@ -45,6 +46,43 @@ class LogAnalysisTests(unittest.TestCase):
         self.assertEqual(result['counts']['error'], 7)
         self.assertNotIn('source_file', result['first_failure'])
         self.assertEqual(result['first_failure']['log_line'], 1)
+
+    def test_filter_cannot_waive_unreported_uvm_summary_or_fatal(self):
+        rule = {'schema_version': 1, 'rules': [
+            {'phase': 'simulate', 'log_file': 'run.log', 'code': 'KNOWN',
+             'message': 'reviewed message', 'reason': 'approved exception'}]}
+        settings = dict(self.settings, error_filter=load_filter(self.work / 'rules.json', json.dumps(rule).encode()))
+        report = self.analyze('UVM_ERROR tb.sv(1) @ 1: top [KNOWN] reviewed message\n'
+                              'UVM_ERROR : 2\nUVM_FATAL : 1\n', **settings)
+        self.assertEqual(report['counts'], {'warning': 0, 'error': 2, 'fatal': 1})
+        self.assertEqual(report['waived_counts'], {'error': 1, 'fatal': 0})
+        self.assertEqual(report['blocking_counts'], {'error': 1, 'fatal': 1})
+        self.assertEqual(report['waivers'][0]['log_file'], 'run.log')
+
+    def test_filter_does_not_waive_a_different_scanned_log(self):
+        rule = {'schema_version': 1, 'rules': [
+            {'phase': 'simulate', 'log_file': 'run.log', 'code': 'KNOWN',
+             'message': 'reviewed', 'reason': 'approved exception'}]}
+        filter_data = load_filter(self.work / 'rules.json', json.dumps(rule).encode())
+        self.log.write_text('UVM_ERROR : 0\n')
+        (self.work / 'other.log').write_text('Error-[KNOWN] reviewed\n')
+        settings = dict(self.settings, files=['run.log', 'other.log'], error_filter=filter_data)
+        report, _ = scan(self.work, settings, 'simulate', self.task)
+        self.assertEqual(report['blocking_counts']['error'], 1)
+        self.assertEqual(report['waived_counts']['error'], 0)
+
+    def test_custom_filter_requires_each_reported_error_to_have_a_matching_diagnostic(self):
+        rule = {'schema_version': 1, 'rules': [
+            {'phase': 'simulate', 'log_file': 'run.log', 'code': 'KNOWN',
+             'message': 'reviewed', 'reason': 'approved exception'}]}
+        settings = dict(self.settings, error_filter=load_filter(self.work / 'rules.json', json.dumps(rule).encode()))
+        custom = {'complete': True, 'counts': {'warning': 0, 'error': 2, 'fatal': 0},
+                  'diagnostics': [{'severity': 'error', 'code': 'KNOWN', 'message': 'reviewed',
+                                   'log_file': 'run.log', 'log_line': 1}]}
+        self.log.write_text('Error-[KNOWN] reviewed\nError-[OTHER] hidden by analyzer\n')
+        report, _ = scan(self.work, settings, 'simulate', self.task, custom=custom)
+        self.assertEqual(report['waived_counts']['error'], 1)
+        self.assertEqual(report['blocking_counts']['error'], 1)
 
     def test_vcs_multiline_and_runtime_fatal_locations(self):
         result = self.analyze('Error-[SE] Syntax error\n  "rtl/top.sv", 19: token is bad\n  offending statement\n\n'

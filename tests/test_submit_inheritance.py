@@ -48,6 +48,39 @@ class SubmitInheritanceTests(Fixture):
         self.assertEqual(loaded['log_analysis']['max_diagnostics'], 12)
         self.assertNotIn('extends', loaded)
 
+    def test_error_filter_path_in_parent_is_anchored_and_hashed(self):
+        rules = self.project / 'rules' / 'errors.json'
+        rules.parent.mkdir()
+        write_json(rules, {'schema_version': 1, 'rules': [
+            {'phase': 'simulate', 'log_file': 'run.log', 'code': 'KNOWN',
+             'message': 'reviewed', 'reason': 'known tool output'}]})
+        self.parent['log_analysis'] = {'error_filter': '../rules/errors.json'}
+        self.save()
+        loaded = load_submit(self.submit)
+        self.assertEqual(loaded['log_analysis']['error_filter']['path'], str(rules))
+        self.assertEqual(loaded['log_analysis']['error_filter']['sha256'], digest(rules))
+        plan = self.plan()
+        self.assertIn(str(rules), plan['input_hashes'])
+        self.assertEqual(plan['snapshots'][str(rules)], rules.read_text())
+        write_json(rules, {'schema_version': 1, 'rules': []})
+        with self.assertRaises(IntegrityError):
+            check_identity(plan)
+
+    def test_error_filter_rejects_missing_or_unsafe_rules(self):
+        self.data['log_analysis'] = {'error_filter': 'errors.json'}
+        self.save()
+        with self.assertRaisesRegex(ConfigError, 'regular file'):
+            load_submit(self.submit)
+        rules = self.project / 'errors.json'
+        for rule in (
+                {'phase': 'simulate', 'code': 'UVM_SUMMARY', 'message': 'any', 'reason': 'unsafe'},
+                {'phase': 'compile', 'log_file': 'run.log', 'code': 'E', 'message': 'known', 'reason': 'wrong phase'},
+                {'phase': 'simulate', 'code': 'E', 'message': 'known', 'reason': ''}):
+            with self.subTest(rule=rule):
+                write_json(rules, {'schema_version': 1, 'rules': [rule]})
+                with self.assertRaises(ConfigError):
+                    load_submit(self.submit)
+
     def test_boolean_and_dpi_override_before_defaults(self):
         self.parent = common_submit('rtl')
         self.parent['vcs'].update(fsdb=True, dpi={'makefile': 'model/Makefile'})

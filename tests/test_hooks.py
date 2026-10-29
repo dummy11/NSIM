@@ -28,14 +28,15 @@ if mode == 'compile':
 elif mode == 'sim':
     case, seed, result = args
     mark('simulate')
-    print('UVM_ERROR tb/checker.sv(27) @ 42: top.env [BAD] mismatch' if case == 'bad' else 'UVM_WARNING : 1' if case == 'warn' else 'UVM_ERROR : 0', flush=True)
+    print('UVM_ERROR tb/checker.sv(27) @ 42: top.env [BAD] mismatch' if case in ('bad', 'no_compare', 'incomplete') else 'UVM_WARNING : 1' if case == 'warn' else 'UVM_ERROR : 0', flush=True)
     if case == 'many':
         for i in range(250):
             print('Error-[E] mismatch ' + str(i) + ' ' + 'x' * 1000 + '\\n  detailed context ' + str(i) + '\\n')
     if case == 'slow':
         time.sleep(2)
+    checks = {} if case == 'incomplete' else {'functional':{'executed':case != 'no_compare','passed':True}}
     Path(result).write_text(json.dumps({'schema_version':1,'case':case,'seed':int(seed),'complete':True,
-                                      'checks':{'functional':{'executed':True,'passed':True}}}))
+                                      'checks':checks}))
 elif mode == 'hook':
     mark(args[0])
     if args[0] == 'fail':
@@ -76,6 +77,72 @@ class HookTests(Fixture):
         return create_plan(self.project, cases=[case] if phase != 'com' else None,
                            submit_paths=[self.submit], seeds=[42] if phase != 'com' else None, phase=phase, **kwargs)
 
+    def filter(self, *rules):
+        path = self.project / 'error_filter.json'
+        write_json(path, {'schema_version': 1, 'rules': list(rules)})
+        self.data['log_analysis'] = {'error_filter': 'error_filter.json'}
+        self.save_submit()
+        return path
+
+    def test_error_filter_waives_exact_sim_error_and_keeps_raw_evidence(self):
+        self.filter({'phase': 'simulate', 'log_file': 'run.log', 'code': 'BAD',
+                     'message': 'mismatch', 'reason': 'reviewed test diagnostic'})
+        record, state = run(self.one('bad'), [self.out])
+        self.assertTrue(state['passed'], state)
+        summary = json.loads((record / 'run.json').read_text())['analysis']
+        self.assertEqual(summary['result_verdict'], 'PASS')
+        self.assertEqual(summary['counts']['simulation']['error'], 1)
+        self.assertEqual(summary['blocking_counts']['simulation']['error'], 0)
+        self.assertEqual(summary['waived_counts']['simulation']['error'], 1)
+        self.assertEqual(summary['waivers']['simulation'][0]['rule'], 1)
+        self.assertIn('UVM_ERROR', (record / 'run.log').read_text())
+        self.assertEqual(load_final(record)[1]['tasks'][0]['effective_verdict'], 'PASS')
+        from nsim.dashboard import task_row
+        from nsim.reports import markdown
+        self.assertEqual(task_row(state['tasks'][0], record)['waived_errors'], 1)
+        self.assertIn('| 1 |', markdown(state))
+        for case, expected in [('no_compare', 'NO_COMPARE'), ('incomplete', 'INCOMPLETE')]:
+            with self.subTest(case=case):
+                record, state = run(self.one(case), [self.out])
+                summary = json.loads((record / 'run.json').read_text())['analysis']
+                self.assertEqual(state['tasks'][0]['effective_verdict'], expected)
+                self.assertEqual(summary['result_verdict'], expected)
+                self.assertEqual(summary['waived_counts']['simulation']['error'], 1)
+
+    def test_unmatched_error_and_missing_checks_preserve_their_verdicts(self):
+        self.filter({'phase': 'simulate', 'code': 'BAD', 'message': 'different text',
+                     'reason': 'unmatched'})
+        for case, expected in [('bad', 'FAIL'), ('no_compare', 'NO_COMPARE'), ('incomplete', 'INCOMPLETE')]:
+            with self.subTest(case=case):
+                record, state = run(self.one(case), [self.out])
+                summary = json.loads((record / 'run.json').read_text())['analysis']
+                self.assertEqual(state['tasks'][0]['effective_verdict'], expected)
+                self.assertEqual(summary['result_verdict'], 'PASS' if case == 'bad' else expected)
+                self.assertEqual(summary['blocking_counts']['simulation']['error'], 1)
+
+    def test_compile_filter_affects_readiness_and_build_identity(self):
+        path = self.filter({'phase': 'compile', 'log_file': 'compile.log', 'code': 'SE',
+                            'message': 'bad syntax', 'reason': 'reviewed tool output'})
+        self.data['compile']['argv'].append('bad')
+        self.save_submit()
+        first = self.one('good')
+        build_id = first['tasks'][0]['build_id']
+        record, state = run(first, [self.out])
+        self.assertTrue(state['passed'], state)
+        self.assertEqual(state['tasks'][0]['attempts'][0]['compile_log_analysis']['counts']['error'], 1)
+        self.assertEqual(state['tasks'][0]['attempts'][0]['compile_log_analysis']['blocking_counts']['error'], 0)
+        compile_rule = {'phase': 'compile', 'log_file': 'compile.log', 'code': 'SE',
+                        'message': 'bad syntax', 'reason': 'reviewed tool output'}
+        write_json(path, {'schema_version': 1, 'rules': [
+            {'phase': 'simulate', 'code': 'BAD', 'message': 'mismatch', 'reason': 'sim only'},
+            compile_rule]})
+        self.assertEqual(build_id, self.one('good')['tasks'][0]['build_id'])
+        write_json(path, {'schema_version': 1, 'rules': []})
+        self.assertNotEqual(build_id, self.one('good')['tasks'][0]['build_id'])
+        from nsim.planning import check_identity
+        with self.assertRaises(Exception):
+            check_identity(first)
+
     def test_all_stages_single_or_multiple_hooks_execute_in_declared_order(self):
         self.data['hooks'] = {'pre_compile':[self.hook('c1'),self.hook('c2')],
                               'post_compile':self.hook('c3'), 'pre_sim':self.hook('s1'),
@@ -92,6 +159,7 @@ class HookTests(Fixture):
         self.assertEqual(json.loads((record/'run.json').read_text())['analysis']['verdict'], 'PASS')
         self.assertFalse((record/'log_analysis.json').exists())
         self.assertFalse((record/'.nsim-log-analysis.json').exists())
+
         self.assertEqual(json.loads((record/'run.json').read_text())['analysis']['scan_complete'], {'compile': True, 'simulation': True})
 
     def test_single_and_regression_agree_and_report_error_location(self):
@@ -303,12 +371,24 @@ class HookTests(Fixture):
         self.assertFalse((record/'log_analysis.json').exists())
         self.assertFalse((record/'.nsim-log-analysis.json').exists())
 
+        # Built-in filtering is evaluated on the worker with the planned rules.
+        self.data['hooks']['post_sim'] = self.hook('after_sim')
+        self.filter({'phase': 'simulate', 'log_file': 'run.log', 'code': 'BAD',
+                     'message': 'mismatch', 'reason': 'reviewed test diagnostic'})
+        record, state = run(self.one('bad'), [self.out])
+        self.assertTrue(state['passed'], state)
+        summary = json.loads((record / 'run.json').read_text())['analysis']
+        self.assertEqual(summary['counts']['simulation']['error'], 1)
+        self.assertEqual(summary['waived_counts']['simulation']['error'], 1)
+
 
     def test_case_summary_stays_small_with_many_multiline_errors_and_raw_evidence(self):
         record, state = run(self.one('many'), [self.out])
         summary = json.loads((record/'run.json').read_text())['analysis']
         self.assertEqual(set(summary), {'schema_version', 'case', 'seed', 'verdict', 'reason',
-                                        'first_error', 'counts', 'scan_complete'})
+                                        'first_error', 'first_blocking', 'counts', 'scan_complete', 'result_verdict',
+                                        'result_reason', 'blocking_counts', 'waived_counts',
+                                        'waivers', 'error_filter_sha256'})
         self.assertEqual(summary['schema_version'], 3)
         self.assertEqual(summary['verdict'], 'FAIL')
         self.assertEqual(summary['counts']['simulation'], dict(warning=0, error=250, fatal=0))

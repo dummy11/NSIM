@@ -235,7 +235,8 @@ class Builds:
             if stage['timed_out'] or stage['cancelled'] or stage['exit_code'] != 0:
                 raise ConfigError('compilation timed out, was cancelled or failed')
             analysis = stage.get('log_analysis')
-            if not analysis or not analysis['complete'] or analysis['counts']['error'] + analysis['counts']['fatal']:
+            blocking = analysis.get('blocking_counts', analysis['counts']) if analysis else None
+            if not analysis or not analysis['complete'] or blocking['error'] + blocking['fatal']:
                 raise ConfigError('compile log analysis: ' + (analysis['failure_reason'] if analysis else 'unavailable'))
             if argv:
                 manifest['artifacts'] = artifact_files(build, submit['compile']['artifacts'])

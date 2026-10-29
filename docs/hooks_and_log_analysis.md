@@ -130,6 +130,57 @@ submit 的可选 `log_analysis` 对象：
 
 以上即默认值。仿真主命令、pre_sim 和 post_sim 的 stdout/stderr 按执行顺序合入 `run.log`；编译主命令、pre_compile 和 post_compile 同理合入 `compile.log`。stdout/stderr 共用一个追加写句柄，程序自身的输出缓冲仍可能影响显示顺序。主命令不会截断前置 hook 的输出，超时和取消后的已写内容也会保留。
 
+### 已确认错误的精确豁免
+
+submit 可增加 `log_analysis.error_filter`，指向一个独立 JSON 文件。例如：
+
+```json
+{
+  "log_analysis": {
+    "compile_files": ["compile.log"],
+    "files": ["run.log"],
+    "error_filter": "../rules/error_filter.json"
+  }
+}
+```
+
+路径相对声明该字段的 submit 文件；若由 `extends` 的 common 模板声明，就相对 common 模板。
+规则文件内容示例：
+
+```json
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "phase": "compile",
+      "log_file": "compile.log",
+      "code": "KNOWN_TOOL_MESSAGE",
+      "message": "reviewed harmless diagnostic",
+      "reason": "已核对工具版本和编译产物"
+    },
+    {
+      "phase": "simulate",
+      "log_file": "run.log",
+      "code": "KNOWN_UVM_ID",
+      "message": "reviewed harmless diagnostic",
+      "reason": "已核对检查结果"
+    }
+  ]
+}
+```
+
+`phase` 必填，取 `compile` 或 `simulate`。`code` 和 `message` 都必须精确相等；`message`
+只匹配诊断首行，不包含 VCS 后续追加的源码位置与上下文。`log_file` 可省略，省略时该规则
+适用于所选阶段的全部已扫描日志；填写时必须等于 `compile_files` 或 `files` 中的相对路径。
+规则只匹配 `error`，不豁免 `fatal`；缺少逐条消息的 `UVM_ERROR : N` 汇总差额仍阻止通过。
+自定义分析器只可豁免其明确列出的诊断；仅提供错误计数而没有对应逐条诊断时仍阻止通过。
+规则文件缺失、格式不合法或运行过程中内容改变会报错，不能静默跳过。最多 128 条规则，
+文件最多 128 KiB；规则文件内容摘要纳入运行计划与输入校验，编译阶段的规则纳入编译身份。
+
+扫描结果保留原始 `error`/`fatal` 计数，并另存 `blocking_counts`、`waived_counts` 和最多 8 条
+命中记录（规则序号、日志位置、原因）。即使日志错误全被豁免，进程退出失败、必需检查未执行、
+结果文件或日志扫描不完整也不能通过。未配置规则文件时，日志错误继续阻止原本通过的结果。
+
 VCS 原生工具日志独立使用 `-l sim.log` / `-l vcs.log`，默认不再重复扫描；存在时纳入证据校验。command 包装器应遵循相同命名，不要自行覆盖或重定向到 NSIM 管理的主日志。工具若有只写入专用文件的诊断，可显式配置扫描该文件；文件列表整体替换默认值，多个文件包含相同诊断时会重复计数，应按实际内容选择输入或使用自定义分析器。路径相对当前阶段目录，不接受绝对路径、父目录跳转、符号链接或非普通文件。列表中的文件都必须存在并完成扫描；不把缺失文件当成空日志。
 
 旧 submit 显式列出 `launch.log` / `compile.err` 时，会保留空的兼容文件；新的 stderr 已全部写入主日志，不复制一份。建议将旧列表更新为上述默认值。
@@ -183,7 +234,16 @@ sim_dir/case_seed/
   "seed": 42,
   "verdict": "FAIL",
   "reason": "all required checks passed | log: scoreboard mismatch",
+  "result_verdict": "PASS",
+  "result_reason": "all required checks passed",
   "first_error": {
+    "phase": "simulation",
+    "log_file": "/output/demo/rtl/sim_dir/conv_basic_42/run.log",
+    "log_line": 153,
+    "source_file": "tb/checker.sv",
+    "source_line": 27
+  },
+  "first_blocking": {
     "phase": "simulation",
     "log_file": "/output/demo/rtl/sim_dir/conv_basic_42/run.log",
     "log_line": 153,
@@ -194,13 +254,26 @@ sim_dir/case_seed/
     "compile": {"warning": 0, "error": 0, "fatal": 0},
     "simulation": {"warning": 0, "error": 1, "fatal": 0}
   },
+  "blocking_counts": {
+    "compile": {"error": 0, "fatal": 0},
+    "simulation": {"error": 1, "fatal": 0}
+  },
+  "waived_counts": {
+    "compile": {"error": 0, "fatal": 0},
+    "simulation": {"error": 0, "fatal": 0}
+  },
+  "waivers": {"compile": [], "simulation": []},
+  "error_filter_sha256": {"compile": null, "simulation": null},
   "scan_complete": {"compile": true, "simulation": true}
 }
 ```
 
 - `reason` 为单行原因，最长 512 字符；多行上下文和重复错误留在原始日志。
 - `first_error` 只含首错阶段与已知源码/日志位置，不复制消息正文、report ID 或 component。没有首错或没有可用位置时为 null，不编造位置。
+- `first_blocking` 是首条未豁免错误的位置；若没有未豁免错误或位置不可得则为 null。报告和终端优先显示它，`first_error` 仍保留原始首错。
 - `counts` 分开记录编译与仿真的 warning/error/fatal 数量，回归共享编译仍只计一次。阶段未获得分析结果时，该阶段计数为 null，不能解释为零错误。
+- `result_verdict` 和 `result_reason` 是合并日志之前的执行与结构化检查结论；最终结论仍在 `verdict` 和 `reason`。无仿真结果时前者为 null。
+- `blocking_counts` 与 `waived_counts` 将日志原始错误数量分开；`waivers` 记录规则命中摘要，`error_filter_sha256` 标识使用的规则内容。原始日志与 `counts` 不因豁免而改变。
 - `scan_complete` 同样按阶段记录：true 表示已完整扫描，false 表示扫描不完整，null 表示未获得分析结果。日志完整且零错误也不能替代功能检查或进程状态。
 
 从 schema 2 迁移：不再保存 `compile`/`simulation` 嵌套报告以及 `diagnostics`、`files`、`issues`、`scan_attempts` 等明细。需要排查时按 `first_error` 返回原始日志；源码位置与日志行号含义不同，均从 1 开始。共享编译的 `com_dir/log_analysis.json` 保持原协议。

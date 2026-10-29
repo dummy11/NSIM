@@ -366,6 +366,10 @@ counts（warning/error/fatal）和 diagnostics 的分析协议。未声明时使
 log_analysis.files/compile_files 为仿真/编译日志相对路径的非空数组，不能越界或引用分析输出自身。
 max_diagnostics 为 1–10000，限制共享编译诊断及自定义分析协议；case 摘要不复制诊断数组。
 max_scan_bytes 为正整数，settle_seconds 为非负秒数；截断或扫描失败会标记扫描不完整。
+可选 log_analysis.error_filter 指向一个 JSON 规则文件，路径相对声明此字段的 submit（含 common 父模板）。
+每条规则必须指定 phase（compile/simulate）、code、单行精确 message 和 reason；可用 log_file
+限定为该阶段已配置扫描的日志相对路径。只豁免完整扫描中精确匹配的 error；fatal、未列出的
+UVM 汇总计数、未匹配错误和检查未执行/不完整均不能据此通过。原始日志与错误计数保留。
 详细诊断查看原始日志。
 
 | 位置 | 支持的占位符 |

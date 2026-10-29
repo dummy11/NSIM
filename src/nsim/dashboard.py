@@ -57,7 +57,7 @@ def task_row(task, journal):
     verdict = ('INCOMPLETE' if task.get('evidence_error') else
                attempt.get('verdict', task['status'].upper()))
     report = attempt.get('log_analysis') or attempt.get('compile_log_analysis') or {}
-    first = report.get('first_failure') or {}
+    first = report.get('first_blocking') or report.get('first_failure') or {}
     location = first.get('source_file') or first.get('log_file') or ''
     line = first.get('source_line') if first.get('source_file') else first.get('log_line')
     if location and line:
@@ -65,7 +65,8 @@ def task_row(task, journal):
     analysis = attempt.get('record_path') or next((p for p in attempt.get('evidence', {}) if Path(p).name == 'analysis.json'), None)
     return dict(id=task['id'], case=task['case'], submit=task['submit_name'], seed=task['seed'],
                 verdict=verdict, errors=report.get('counts', {}).get('error', 0),
-                fatals=report.get('counts', {}).get('fatal', 0), location=location[:1024],
+                fatals=report.get('counts', {}).get('fatal', 0),
+                waived_errors=report.get('waived_counts', {}).get('error', 0), location=location[:1024],
                 reason=(attempt.get('reason') or task.get('pending_reason') or '')[:2048],
                 analysis=quote(os.path.relpath(analysis, journal), safe='/') if analysis else None)
 
@@ -116,7 +117,7 @@ CLIENT = r'''
       const row = document.createElement("tr");
       if (kind === 'cases') {
         row.dataset.taskId = item.id;
-        for (const value of [item.case, item.submit, item.seed, item.verdict, item.errors, item.fatals, item.location, item.reason]) textCell(row, value);
+        for (const value of [item.case, item.submit, item.seed, item.verdict, item.errors, item.fatals, item.waived_errors, item.location, item.reason]) textCell(row, value);
         const cell = textCell(row, "");
         if (item.analysis) {
           const link = document.createElement("a");
@@ -208,7 +209,7 @@ th{white-space:nowrap;color:#475467;font-weight:600}td{max-width:440px;overflow-
 <div class="meta">运行 ID：<span id="run-id"></span><br>最近发布：<span id="updated"></span> · 版本 <span id="revision"></span></div>
 <p id="connection" role="status" aria-live="polite">静态报告 · 实时 Dashboard 显示在运行终端</p><p id="message"></p><div class="cards">''' + cards + '''</div>
 </header><section><p id="page-error" role="status"></p><h2>Case 结果</h2>''' + controls('cases') + '''<div class="table-wrap"><table><thead><tr>
-<th>Case</th><th>Submit</th><th>Seed</th><th>状态 / 判定</th><th>Error</th><th>Fatal</th><th>错误位置</th><th>原因</th><th>结果</th>
+<th>Case</th><th>Submit</th><th>Seed</th><th>状态 / 判定</th><th>Error</th><th>Fatal</th><th>豁免 Error</th><th>错误位置</th><th>原因</th><th>结果</th>
 </tr></thead><tbody id="cases"></tbody></table></div></section>
 <section><h2>LSF 作业</h2>''' + controls('jobs') + '''<div class="table-wrap"><table><thead><tr><th>Job ID</th><th>阶段</th><th>状态</th><th>已确认终态</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
 <section><h2>日志汇总</h2><p id="log-summary"></p><p class="meta">运行中结果来自已保存的 case 分析。最终报告发布后才确认整批结果。</p>
@@ -244,7 +245,7 @@ class TerminalDisplay:
     @staticmethod
     def case_line(row):
         return (f"{row['case']}  {row['submit']}  seed={row['seed']}  {row['verdict']}  "
-                f"E/F={row['errors']}/{row['fatals']}  {row['location']}  {row['reason']}")
+                f"E/F={row['errors']}/{row['fatals']}  waived={row.get('waived_errors', 0)}  {row['location']}  {row['reason']}")
 
     def render(self, data, cases=(), jobs=()):
         if self.closed:

@@ -74,7 +74,7 @@ output/regr_dir/<regression-id>/report/
 
 `live.json` schema 3 包含 `run_id`、`revision`、`lifecycle`、`published_at`、`terminal`、`passed`、`totals`、`log_summary`、`recent_cases`、`recent_jobs`、`job_counts`、`job_count` 和 `message`。它不复制全量任务或证据，不再带分页索引，也没有定时心跳。运行中完整 attempt 通常在各 case 的 `run.json.task.attempts`；若某个 case 的记录写失败，错误和该 attempt 保存在回归 `state.json`。
 
-最终 `report.html` 每页最多渲染 100 个 case 或作业，可翻页、跳转页码和查看分析/证据链接。HTML 不建立连接、不读取实时文件、不设置刷新定时器。后续日志被覆盖或损坏时，用 `nsim report show <record_dir>` 重新校验；重跑和恢复仍以完整的最终记录为依据。
+最终 `report.html` 每页最多渲染 100 个 case 或作业，可翻页、跳转页码和查看分析/证据链接。HTML 不建立连接、不读取实时文件、不设置刷新定时器。用 `nsim report <record_dir>` 校验完成记录、页面与证据；完整时打印最终 HTML 的本地路径与浏览器地址，不完整时只给出简短原因。`--rebuild` 将现存可信记录重新汇总到 `report.rebuilt.html`，不覆盖由 `final.json` 校验的原报告，也不运行 case。
 
 控制器按变更任务维护计数，共享编译按路径去重；每次事件只更新相关条目和有界摘要。任务索引、最终状态及完整报告仍随任务数增长，不能据此推断无限规模支持。
 

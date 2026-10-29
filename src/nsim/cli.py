@@ -11,7 +11,6 @@ from nsim import get_version
 from nsim.cli_aliases import add_argument, add_command
 from nsim.config import MODES, ConfigError, discover, load_project
 from nsim.planning import create_plan
-from nsim.reports import load_final, markdown
 from nsim.service import replay, run
 from nsim.storage import IntegrityError, preflight
 from nsim.lsf import LsfError
@@ -88,11 +87,10 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
         add_argument(again, "--jobs", type=int)
         add_argument(again, "--retries", type=int)
         add_argument(again, "--retry-seconds", type=float)
-    report = add_command(commands, "report", help="Validate and show terminal evidence")
-    reports = report.add_subparsers(dest="action", required=True)
-    show = add_command(reports, "show")
-    add_argument(show, "source", type=Path)
-    add_argument(show, "--json", action="store_true")
+    report = add_command(commands, "report", help="Inspect saved results or rebuild an HTML report")
+    add_argument(report, "source", type=Path, help="Completed case, regression or batch directory")
+    add_argument(report, "--rebuild", action="store_true", help="Write a derived HTML view without changing execution records")
+    add_argument(report, "--json", action="store_true")
     storage = add_command(commands, "storage", help="Probe an existing storage root")
     probes = storage.add_subparsers(dest="action", required=True)
     probe = add_command(probes, "check")
@@ -185,9 +183,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(json.dumps(preflight(args.root.resolve(), args.min_free_bytes, args.min_free_inodes), indent=2))
             return 0
         if args.command == "report":
-            _, state = load_final(args.source)
-            print(json.dumps(state, indent=2) if args.json else markdown(state))
-            return 0 if state["passed"] else 1
+            from nsim.report_command import report
+            output, code = report(args.source, rebuild=args.rebuild, as_json=args.json)
+            print(output)
+            return code
         if args.command in ('com', 'sim', 'run', 'regr'):
             if getattr(args, 'regr_list', None):
                 from nsim.batch import run_batch, prepare_batch, validate_outer

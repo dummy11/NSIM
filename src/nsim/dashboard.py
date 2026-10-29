@@ -184,7 +184,7 @@ CLIENT = r'''
 '''
 
 
-def page(data):
+def page(data, report_filename='report.html'):
     def controls(kind):
         return (f'<p><button id="{kind}-prev">上一页</button> '
                 f'<input id="{kind}-page" type="number" min="1" value="1" aria-label="页码" style="width:80px"> '
@@ -213,7 +213,7 @@ th{white-space:nowrap;color:#475467;font-weight:600}td{max-width:440px;overflow-
 </tr></thead><tbody id="cases"></tbody></table></div></section>
 <section><h2>LSF 作业</h2>''' + controls('jobs') + '''<div class="table-wrap"><table><thead><tr><th>Job ID</th><th>阶段</th><th>状态</th><th>已确认终态</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
 <section><h2>日志汇总</h2><p id="log-summary"></p><p class="meta">运行中结果来自已保存的 case 分析。最终报告发布后才确认整批结果。</p>
-<a href="report.html">最终报告</a> · <a href="live.json">实时 JSON</a></section>
+<a href="''' + html.escape(report_filename, quote=True) + '''">最终报告</a> · <a href="live.json">实时 JSON</a></section>
 <noscript>此报告需要 JavaScript 分页查看。也可查看同目录的 report.md 或 state.json。</noscript>
 </main><script>const NSIM_INITIAL = ''' + javascript_value(data) + ';\n' + CLIENT + '</script></body></html>').encode('utf-8')
 

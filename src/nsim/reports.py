@@ -64,7 +64,7 @@ def assessed(state, verify=True, verified=None):
     return value
 
 
-def load_final(journal: Path):
+def load_final(journal: Path, allow_broken_views=False):
     journal = journal.resolve()
     if (journal / 'report' / 'plan.json').is_file():
         journal = journal / 'report'
@@ -91,7 +91,7 @@ def load_final(journal: Path):
         final = read_json(journal / "final.json")
         if isinstance(final, dict) and final.get('kind') == 'batch':
             from nsim.batch import load_batch_final
-            return load_batch_final(journal)
+            return load_batch_final(journal, allow_broken_views=allow_broken_views)
         if not isinstance(final, dict) or final.get("schema_version") not in (1, 2) or final.get("terminal") is not True:
             raise IntegrityError("source has no terminal completion record")
         base = {'plan.json', 'state.json'}
@@ -101,6 +101,8 @@ def load_final(journal: Path):
             raise IntegrityError("invalid final manifest file set")
         records = {}
         for filename, expected in final["files"].items():
+            if allow_broken_views and filename not in base:
+                continue
             if filename in base:
                 data = (journal / filename).read_bytes()
                 actual = hashlib.sha256(data).hexdigest()
@@ -176,10 +178,12 @@ def markdown(state, verify=True):
     return "\n".join(lines)
 
 
-def html_report(state, verify=True):
+def html_report(state, verify=True, notice='', report_filename='report.html'):
     from nsim.dashboard import page, view
     state = assessed(state, verify)
     messages = [str(item) for item in state['report_errors'] + state.get('scheduler_errors', [])]
+    if notice:
+        messages.insert(0, notice)
     data = view(state, Path.cwd(), 1, 'complete' if state['terminal'] else 'running', '\n'.join(messages))
     for task, row in zip(state['tasks'], data['rows']):
         attempt = task['attempts'][-1] if task['attempts'] else {}
@@ -189,4 +193,4 @@ def html_report(state, verify=True):
                                 evidence=[dict(name=Path(p).name, url=Path(p).as_uri()) for p in a.get('evidence', {})])
                            for a in task['attempts']]
     # A self-contained final snapshot; only the selected page creates DOM rows.
-    return page(data)
+    return page(data, report_filename=report_filename)

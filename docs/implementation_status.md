@@ -4,6 +4,12 @@
 
 本页按 2026-10-29 工作区整理。`pyproject.toml` 版本仍为候选 `0.1.0`；本地代码、测试通过与远端发布是独立状态。下文各次测试及构建记录只描述当时快照，不能自动延伸到后续改动。
 
+## 2026-10-29 report 入口与只读重建
+
+`nsim report SOURCE` 直接接收单 case、回归或批次目录，不再使用 `show` 子命令。单 case 在终端打印结果摘要；完整回归或批次给出已校验 `report.html` 的路径和浏览器地址。报告文件或证据不完整时显示简短原因；`--rebuild` 从可校验的控制记录生成独立的 `report.rebuilt.html`，保留原 `final.json` 和任务记录，绝不提交或重启任务。损坏的控制记录不能用于重建；已变更的通过证据显示为 INCOMPLETE。稳定启动器继续按历史记录选择 NSIM 版本。
+
+验证：定向报告、批次、简写和 Dashboard 测试 52 项通过，补充回归内单 case 与缺失子报告测试后，报告和批次测试 28 项通过。最终完整 unittest 套件 **418 项通过（297.015 秒）**。测试使用 fake 适配器和本地 LSF 进程桩，不代表真实 VCS 或 LSF farm 验收。
+
 ## 2026-10-29 Submit 文件管理与完整 bootstrap 示例
 
 新增 submit `files` 输入表及 `{file:NAME}` 引用。文件、目录、glob 与显式子依赖统一按验证工程根解析，按 compile/simulate/analysis 记录内容摘要与成员集合；同名声明可继承覆盖，null 删除继承项。小文件保存有界 base64 快照，snapshot=false 仍追踪内容身份。普通参数、hooks、DPI 输入和用例配置支持文件引用，错误名称和阶段不匹配会拒绝；error_filter 保留旧路径语义，并支持 analysis 文件引用。

@@ -24,7 +24,7 @@
 | `nsim regr` | 按用例清单批量编译、仿真及汇总 | 无 |
 | `nsim rerun SOURCE` | 重跑已结束记录中未通过的任务 | `SOURCE` 必填 |
 | `nsim recover SOURCE` | 恢复存储或证据失败的任务 | `SOURCE` 必填 |
-| `nsim report show SOURCE` | 校验证据并显示终态报告 | `SOURCE` 必填 |
+| `nsim report SOURCE` | 查看单 case 结果或校验回归 HTML，可重建展示页面 | `SOURCE` 必填 |
 | `nsim storage check ROOT` | 检查已有输出目录的空间及读写能力 | `ROOT` 必填 |
 | `nsim version` | 显示当前工具版本 | 无 |
 | `nsim capabilities` | 显示支持的项目 schema | 无 |
@@ -234,7 +234,7 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 | --- | --- | --- |
 | `rerun SOURCE` | `-o / --output-root PATH`、`-seed / --seed N`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | 沿用历史输入和版本；历史多根计划需明确选择本次输出根 |
 | `recover SOURCE` | 与 rerun 相同 | 仅选择存储/证据失败；报告发布失败时重建相关任务报告 |
-| `report show SOURCE` | `--json` | 默认输出 Markdown 文本报告 |
+| `report SOURCE` | `--json`、`--rebuild` | 单 case 输出文本摘要；完整回归输出 HTML 路径；不完整时给出简短原因 |
 | `storage check ROOT` | `--min-free-bytes N`、`--min-free-inodes N` | 两个阈值均默认 0；输出 JSON |
 
 重跑的 `-o` 可重复，`-seed` 只能给一个新值。rerun/recover 的并发选项也支持 `-j / -jobs / --jobs`。两者不接受 `--project`、`--dry-run`、`-sub`、`-l`、`-repeat` 或队列覆盖；输入和版本取自历史记录。

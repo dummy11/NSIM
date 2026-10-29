@@ -94,7 +94,7 @@ nightly_20261029T153000_8c4654ad324e4cc689f967769fc054e6
 复制编译产物与证据到本次回归目录后仿真，不重新编译、不使用硬链接；后续顶层重编译不会覆盖这个快照。
 此类回归重跑继续从原回归的已验证编译快照复制，不读取已变化的顶层编译。
 
-`record_dir` 返回 report 子目录。`report show`、`rerun`、`recover` 均可接受回归根或 report 子目录；
+`record_dir` 返回 report 子目录。`report`、`rerun`、`recover` 均可接受回归根或 report 子目录；
 也可从 case 仿真目录通过 run.json 找到对应记录。回归失败重跑创建新的回归与 report，保留原始
 seed、配置和来源，不改写原回归及批次结论。批次重跑需先从批次报告选择具体回归。
 现有 recover 仍针对已发布终态的存储/证据失败，不支持自动接续被中断的批次或状态未知的 LSF 作业。
@@ -122,13 +122,13 @@ HTML 可进入当前回归的 Dashboard、报告或状态文件，行边界与�
 ## 报告、退出码与预览
 
 ```sh
-nsim report show /data/output/regr_dir/RUN_ID
-nsim report show /data/output/regr_batch_dir/BATCH_ID --json
+nsim report /data/output/regr_dir/RUN_ID
+nsim report /data/output/regr_batch_dir/BATCH_ID --json
+nsim report /data/output/regr_batch_dir/BATCH_ID --rebuild
 nsim rerun /data/output/regr_dir/RUN_ID
 ```
 
-批次报告校验自身完成清单以及关联子回归的身份、完成记录和结果证据。历史日志被损坏时重新查询
-会反映证据失效，不把旧 HTML 中的 PASS 当作当前有效证明。
+批次报告校验自身完成清单以及关联子回归的身份、完成记录和结果证据。完整时返回批次 `report.html` 的打开路径；历史日志被损坏时重新查询会提示证据不完整，不把旧 HTML 中的 PASS 当作当前有效证明。`--rebuild` 仅从已保存记录生成新的展示页面，不重新执行任何子回归。
 
 批次全通过返回 0；用例或编译失败返回 1；配置、基础设施或报告发布错误返回 2；Ctrl-C 返回 130。
 所有行均 dry-run 时返回 0 表示预览成功，但 passed=false。混合实跑与预览不会标为全部仿真通过。

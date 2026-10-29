@@ -178,13 +178,13 @@ class InstallerTests(unittest.TestCase):
         simulation = self.base / 'simulation'
         simulation.mkdir()
         (simulation / 'run.json').write_text(json.dumps({'record_dir': str(journal)}))
-        for command in (['rerun'], ['recover'], ['report', 'show']):
+        for command in (['rerun'], ['recover'], ['report']):
             result = subprocess.run([launcher, *command, str(simulation)], cwd=self.project,
                                     capture_output=True, text=True)
             self.assertEqual(result.stdout.strip(), f"0.1.0 {' '.join(command)} {simulation}", result.stderr)
         (simulation / 'run.json').write_text(json.dumps({
             'schema_version': 2, 'plan': {'runtime': {'version': '0.1.0'}}}))
-        for command in (['rerun'], ['recover'], ['report', 'show']):
+        for command in (['rerun'], ['recover'], ['report']):
             result = subprocess.run([launcher, *command, str(simulation)], cwd=self.project,
                                     capture_output=True, text=True)
             self.assertEqual(result.stdout.strip(), f"0.1.0 {' '.join(command)} {simulation}", result.stderr)

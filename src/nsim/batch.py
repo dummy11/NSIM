@@ -117,7 +117,8 @@ def batch_markdown(state):
     for row in state['regressions']:
         total = row['totals']
         target = (Path(row['record_dir']) / 'report.html').as_uri() if row.get('record_dir') else ''
-        lines.append(f"| {row['line']} | {row['id']} | {row['status']} | {total['passed']} | "
+        status = row['status'] + (' (evidence incomplete)' if row.get('evidence_error') else '')
+        lines.append(f"| {row['line']} | {row['id']} | {status} | {total['passed']} | "
                      f"{total['failed']} | {total['total']} | {target} |")
     return '\n'.join(lines) + '\n'
 
@@ -137,7 +138,8 @@ def batch_html(state, journal):
                 links.append(f'<a href="{esc(url)}">{label}</a>')
         total = row['totals']
         rows.append('<tr>' + ''.join(f'<td>{esc(value)}</td>' for value in
-                    (row['line'], row['id'], row['status'], total['passed'], total['failed'],
+                    (row['line'], row['id'], row['status'] + (' (证据不完整)' if row.get('evidence_error') else ''),
+                     total['passed'], total['failed'],
                      total['running'], total['pending'], total['unknown'], total['total'])) +
                     f'<td>{" · ".join(links)}</td><td><code>{esc(shlex.join(row["argv"]))}</code></td></tr>')
     return ('<!doctype html><html lang="zh"><meta charset="utf-8"><title>NSIM 批量回归</title>'
@@ -282,13 +284,14 @@ def run_batch(batch, entries):
         raise
 
 
-def load_batch_final(journal):
+def load_batch_final(journal, allow_broken_views=False):
     from nsim.reports import load_final
     final = read_json(journal / 'final.json')
     if (final.get('kind') != 'batch' or final.get('terminal') is not True or
             set(final.get('files', {})) != {'plan.json', 'state.json', 'report.md', 'report.html'}):
         raise IntegrityError('batch has no valid terminal completion record')
-    verify_files({str(journal / name): value for name, value in final['files'].items()})
+    verify_files({str(journal / name): value for name, value in final['files'].items()
+                  if not allow_broken_views or name in ('plan.json', 'state.json')})
     plan, state = read_json(journal / 'plan.json'), read_json(journal / 'state.json')
     if plan['id'] != state['id'] or not state['terminal'] or len(plan['entries']) != len(state['regressions']):
         raise IntegrityError('batch plan and state disagree')
@@ -301,9 +304,18 @@ def load_batch_final(journal):
             continue
         if digest(record / 'final.json') != row['final_sha256']:
             raise IntegrityError('child regression completion changed')
-        child_plan, child = load_final(record)
+        try:
+            child_plan, child = load_final(record)
+        except IntegrityError as exc:
+            if not allow_broken_views:
+                raise
+            child_plan, child = load_final(record, allow_broken_views=True)
+            row['report_error'] = str(exc)
         if child_plan['id'] != row['id'] or child_plan.get('batch', {}).get('id') != plan['id']:
             raise IntegrityError('child regression identity mismatch')
+        evidence_errors = [task['evidence_error'] for task in child['tasks'] if task.get('evidence_error')]
+        if evidence_errors:
+            row['evidence_error'] = f"{len(evidence_errors)} case evidence file(s) missing or changed"
         row['status'] = 'passed' if child['passed'] else 'failed'
         row['totals'] = final_totals(child)
     counts(state)

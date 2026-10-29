@@ -155,14 +155,14 @@ class ProjectTests(unittest.TestCase):
             self.assertEqual(journal.parent.parent, self.base / 'output' / 'regr_dir')
             plan = json.loads((journal / 'plan.json').read_text())
             self.assertEqual(plan['policy']['output_roots'], [str(self.base / 'output')])
-            self.assertTrue(launch('report', 'show', journal, '--json')['passed'])
+            self.assertTrue(launch('report', journal, '--json')['passed'])
             result = launch(*args, '--output-root', 'override-output')
             journal = Path(result['journal'])
             plan = json.loads((journal / 'plan.json').read_text())
             self.assertEqual(plan['policy']['output_roots'], [str(self.base / 'override-output')])
             self.assertEqual(journal.parent.parent, self.base / 'override-output' / 'regr_dir')
             run_dir = next((self.base / 'output' / 'regr_dir').glob('*/fake/rtl/sim_dir/*'))
-            self.assertTrue(launch('report', 'show', run_dir, '--json')['passed'])
+            self.assertTrue(launch('report', run_dir, '--json')['passed'])
         self.assertFalse((self.base / 'stale-events').exists())
 
     def test_storage_defaults_reject_invalid_config_types(self):

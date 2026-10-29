@@ -75,7 +75,7 @@ class AliasParsingTests(unittest.TestCase):
         for long, short in [('rerun', 'rr'), ('recover', 'rc')]:
             self.same([long, '/record', '--jobs', '3', '--seed', '42', '--retries', '2', '--retry-seconds', '20'],
                       [short, '/record', '-j3', '-S42', '-retry', '2', '-rt', '20'])
-        self.same(['report', 'show', '/record', '--json'], ['rpt', 'show', '/record', '-J'])
+        self.same(['report', '/record', '--json', '--rebuild'], ['rpt', '/record', '-J', '--rebuild'])
         self.same(['storage', 'check', '/out', '--min-free-bytes', '10', '--min-free-inodes', '2'],
                   ['disk', 'check', '/out', '-fb', '10', '-fi', '2'])
 
@@ -174,9 +174,9 @@ class LauncherAliasTests(unittest.TestCase):
         record = self.base / 'record'
         record.mkdir()
         (record / 'plan.json').write_text(json.dumps({'runtime': {'version': '0.1.0'}}))
-        for args in (['rr', str(record), '-j4'], ['rc', str(record), '-S42'], ['rpt', 'show', str(record), '-J'],
+        for args in (['rr', str(record), '-j4'], ['rc', str(record), '-S42'], ['rpt', str(record), '-J'],
                      ['-o', '/out', 'rr', str(record)], ['rr', '-j4', str(record)],
-                     ['rc', '-S', '42', '-rt', '30', str(record)], ['rpt', 'show', '-J', str(record)]):
+                     ['rc', '-S', '42', '-rt', '30', str(record)], ['rpt', '-J', '--rebuild', str(record)]):
             with self.subTest(args=args), patch.object(self.installer, 'receipt', return_value={'wheel_sha256': 'a' * 64}), patch.object(self.installer.os, 'execve') as execute:
                 self.installer.launch(self.base, args)
                 executable, actual, _ = execute.call_args.args

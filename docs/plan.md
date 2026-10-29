@@ -129,7 +129,7 @@ nsim sim --project <project> --case <name> --submit <submit.json>
 nsim run --project <project> --case <name> --submit <submit.json>
 nsim regr --project <project> -l <file> <other-file> -sub <submit> <other-submit> -seed 42 43
 nsim regr --project <project> -l <file> -sub <submit> -repeat 10
-nsim report show <record-dir>
+nsim report <record-dir>
 nsim rerun <record-dir>
 nsim recover <record-dir> --output-root <healthy-output-root>
 nsim storage check <output-root>

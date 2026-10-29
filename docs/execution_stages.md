@@ -166,6 +166,6 @@ submit 可增加 `compile` 对象：
 
 稳定启动器使用隔离的 Python 启动并清除继承的 Python 搜索路径配置。内置本地 worker 和 LSF worker 绑定控制器的代码路径，避免当前目录或其他项目的 `PYTHONPATH` 替换 nsim。用户配置的编译器、仿真器和 hook 仍使用 submit 声明的环境。
 
-`report show`、`rerun`、`recover` 使用返回的 `record_dir`，不需要 event-root。重跑保留原执行阶段与目录规则：run 重跑重新编译；sim 重跑要求原编译实例仍可验证，不自动改绑新编译。对 sim 指定另一个输出根时，原编译路径也必须保持可定位且相同（共享绝对 `-com-dir` 可满足这一点）；缺失时拒绝隐式编译。修改输入后应发起新的 com/run，而非精确重跑。
+`report`、`rerun`、`recover` 使用返回的 `record_dir`，不需要 event-root。重跑保留原执行阶段与目录规则：run 重跑重新编译；sim 重跑要求原编译实例仍可验证，不自动改绑新编译。对 sim 指定另一个输出根时，原编译路径也必须保持可定位且相同（共享绝对 `-com-dir` 可满足这一点）；缺失时拒绝隐式编译。修改输入后应发起新的 com/run，而非精确重跑。
 
 `--dry-run` 只写独立预览记录，不写编译成功记录，不清理编译或仿真产物。com 预览仅含编译；sim 预览仅含仿真；run/regr 包含两阶段。预览成功不代表所引用编译产物存在或真实 EDA/farm 作业可运行。

@@ -331,7 +331,7 @@ nsim switch latest --project conv_verif
 
 以上版本号是接口示例，须先安装实际可用版本。切换要求目标版本支持项目格式，并与其他更新共用校验及事务逻辑。可把 `.nsim/` 内两份配置提交到 verification 仓库；本机索引不需要提交。
 
-稳定启动器读取 `--project` 或当前目录所属项目的版本文件。`rerun`、`recover` 和 `report show` 优先读取原控制记录的版本，不受项目后续切换影响。没有项目上下文时，普通执行命令在只安装一个版本时使用该版本，否则可设置 `NSIM_VERSION` 明确选择。
+稳定启动器读取 `--project` 或当前目录所属项目的版本文件。`rerun`、`recover` 和 `report` 优先读取原控制记录的版本，不受项目后续切换影响。没有项目上下文时，普通执行命令在只安装一个版本时使用该版本，否则可设置 `NSIM_VERSION` 明确选择。
 
 ## 旧项目兼容
 
@@ -456,17 +456,17 @@ sim_dir 直接按 case 名与 seed 分组；同一组合覆盖旧产物，不创
 
 真正的单跑（一个 case × submit × seed）直接把计划、终态及完成校验保存在仿真目录，不生成实时 HTML 或回归汇总；单个 com 的阶段记录在编译目录。使用 caselist 或多个 submit/seed 时，该次回归的记录和产物均隔离在 regr_dir/<id>/，汇总文件位于 report/。
 
-`report show`、`rerun`、`recover` 接受命令返回的 `record_dir`，也接受批次中某个 sim_dir 的运行目录；后者通过经过校验的 `run.json` 引用选择单个任务。回归记录与该引用应一起保留。重跑沿用相同 case/seed 的目录并覆盖旧结果；修改源码后重新验证应发起新 run。统一覆盖 seed 后指向同一目录的失败任务会合并为一次执行，并保留各自来源。
+`report`、`rerun`、`recover` 接受命令返回的 `record_dir`，也接受批次中某个 sim_dir 的运行目录；后者通过经过校验的 `run.json` 引用选择单个任务。回归记录与该引用应一起保留。重跑沿用相同 case/seed 的目录并覆盖旧结果；修改源码后重新验证应发起新 run。统一覆盖 seed 后指向同一目录的失败任务会合并为一次执行，并保留各自来源。
 
 独立 `--event-root` 参数和 `NSIM_EVENT_ROOT` 已取消。此前候选版本配置中的 `event_root` 仅为兼容读取而忽略，使用 `update --output-root ...` 时从新配置中移除；旧 event-root 目录不迁移、不删除；选中重新执行的 case/seed 目录会按覆盖规则清理。旧记录的 report/rerun 仍由启动器选择其记录的工具版本，精确重跑仍要求原输入和运行时可验证。
 
-单跑只保留最新计划和结果。历史回归的批次记录保留，但被覆盖的用例日志不再代表该历史批次；`report show` 会将缺失或已变更的通过证据标记为 INCOMPLETE。需要长期保存日志时，应在重跑前自行复制，或使用另一个 `-dir` 工作区。
+单跑只保留最新计划和结果。历史回归的批次记录保留，但被覆盖的用例日志不再代表该历史批次；`report` 会将缺失或已变更的通过证据标记为 INCOMPLETE。需要长期保存日志时，应在重跑前自行复制，或使用另一个 `-dir` 工作区。
 
 `--dry-run` 不写编译成功记录，也不清理编译或仿真目录；预览记录统一放在 `regr_dir/<preview-id>/report/`；单跑命令指向原单跑目录，回归命令指向本次独立目录。
 
 运行记录与 output 共享存储。启动时在首个健康输出根建立记录；该记录位置在执行中不可写时停止并返回错误，不伪造完成记录，不承诺整个输出盘丢失后的自动恢复。
 
-回归的 `final.json` 最后发布，绑定计划、状态和成功发布报告的哈希；单跑将完整记录合入 `run.json`，只有其中 terminal=true 且校验通过才视为已完成。`report show` 会重新校验证据；终端进度、`live.json` 和最终 HTML 本身不能替代这次校验。
+回归的 `final.json` 最后发布，绑定计划、状态和成功发布报告的哈希；单跑将完整记录合入 `run.json`，只有其中 terminal=true 且校验通过才视为已完成。`report` 会重新校验证据；终端进度、`live.json` 和最终 HTML 本身不能替代这次校验。
 
 ## LSF 与本地运行
 
@@ -499,12 +499,17 @@ submit 的 hooks 支持 pre_compile、post_compile、pre_sim、post_sim；每个
 命令最终返回 JSON，其中 `record_dir` 是本次运行或回归记录目录；`journal` 保留为同值兼容字段。将下面路径替换为实际返回的 `record_dir`，也可指定回归中某个 `sim_dir/<运行目录>`：
 
 ```sh
-nsim report show /tmp/nsim-output/regr_dir/<regression-id>
-nsim report show /tmp/nsim-output/regr_dir/<regression-id> --json
+nsim report /tmp/nsim-output/regr_dir/<regression-id>
+nsim report /tmp/nsim-output/regr_dir/<regression-id> --json
+nsim report /tmp/nsim-output/regr_dir/<regression-id> --rebuild
 nsim rerun /tmp/nsim-output/regr_dir/<regression-id>
 nsim recover /tmp/nsim-output/regr_dir/<regression-id> --output-root /tmp/nsim-backup
 nsim storage check /tmp/nsim-output --min-free-bytes 104857600
 ```
+
+`report` 无二级 `show` 命令。传入单个 case 的仿真目录时，它在终端打印已保存的结果摘要；传入回归或批次目录时，先校验完成记录、HTML 和结果证据。完整报告会显示 PASS/FAIL 及 `report.html` 的绝对路径和浏览器 `file://` 地址；回归 FAIL 仍可有完整报告。报告或证据不完整时默认只显示简短原因。`--json` 输出机器可读的状态、`report_complete` 和问题列表。
+
+`--rebuild` 从仍可校验的计划与状态生成 `report.rebuilt.html`，不修改原 `final.json`、`report.html` 或任务记录；该新页面不属于原完成校验。如果日志证据发生变化，新页面会将原通过结果标为 INCOMPLETE。计划、状态或完成记录损坏时不能重建。`report` 从不提交、恢复或重启任务；需要重新执行时使用 `rerun` 或 `recover`。`report` 的退出码：完整且通过为 0，完整但任务失败为 1，报告或证据不完整为 2。
 
 `rerun` 仅重跑最终未通过的任务，默认保持原 seed、submit、显式环境和输入身份。`--seed` 可显式改变 seed，来源与变化保存在新计划中。`recover` 选择存储/证据不完整的任务；若整个报告发布失败，则重新运行相关任务以生成完整报告。两者都记录新运行和新 attempt，但相同 case/seed 的日志、结果和波形直接覆盖。批次记录保留原错误和来源关系；单跑目录只保留最新记录。统一修改 seed 后重合的任务只执行一次，保留全部 parent 引用。
 
@@ -526,4 +531,4 @@ nsim storage check /tmp/nsim-output --min-free-bytes 104857600
 
 单跑目录中的运行元数据统一为 schema 2 的 run.json：plan 是运行计划，task.attempts 保存执行历史，analysis 是结果摘要，state/terminal/checksums 保存整体状态与完整性校验。单跑不再生成 plan.json、state.json、final.json、analysis.json、attempt.json 或 records/ 副本。回归 case 的 run.json 引用公共 record_dir，公共计划与最终汇总仍在 report/。工具结果 result.json、hook 与 LSF 协议文件不属于上述合并范围。旧记录继续可读。
 
-查看分析可读取 run.json 的 analysis 字段；report show、rerun、recover 的目录参数保持不变。分析或日志损坏会使有效 PASS 失效，控制记录不完整时拒绝自动重跑。回归实时界面只发布小型进度摘要，完整汇总不会每完成一个 case 就重写。
+查看分析可读取 run.json 的 analysis 字段；report、rerun、recover 的目录参数保持不变。分析或日志损坏会使有效 PASS 失效，控制记录不完整时拒绝自动重跑。回归实时界面只发布小型进度摘要，完整汇总不会每完成一个 case 就重写。

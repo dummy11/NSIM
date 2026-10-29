@@ -426,9 +426,9 @@ def selected_version(args, root):
                 raise InstallError(f'{option} requires a path')
             args.pop(0)
     replay = args and args[0] in {'rerun', 'recover'}
-    report = args[:2] == ['report', 'show']
+    report = bool(args) and args[0] == 'report'
     if replay or report:
-        # Options may precede SOURCE, e.g. rr -j4 RECORD or rpt show -J RECORD.
+        # Options may precede SOURCE, e.g. rr -j4 RECORD or rpt -J RECORD.
         selector = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
         selector.add_argument('source', nargs='?')
         selector.add_argument('-h', '--help', action='store_true')
@@ -440,7 +440,8 @@ def selected_version(args, root):
             selector.add_argument('--retry-seconds')
         else:
             selector.add_argument('--json', action='store_true')
-        options, _ = selector.parse_known_args(args[1 if replay else 2:])
+            selector.add_argument('--rebuild', action='store_true')
+        options, _ = selector.parse_known_args(args[1:])
         if options.source is not None:
             return version_from_journal(options.source)
     project_arg = None

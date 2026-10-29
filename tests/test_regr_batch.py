@@ -96,9 +96,33 @@ class BatchTests(Fixture):
         self.assertEqual(build_ids[0], build_ids[1])
         self.assertNotEqual(build_instances[0], build_instances[1])
         self.assertTrue(load_final(journal.parent)[1]['passed'])
-        output = self.cli('report', 'show', journal.parent, '--json')
+        output = self.cli('report', journal.parent, '--json')
         self.assertEqual(output['totals']['passed'], 4)
         self.assertIn('回归', (journal / 'dashboard.html').read_text())
+
+    def test_report_rebuilds_only_batch_view(self):
+        batch, entries = self.prepare([self.row()])
+        journal, _ = run_batch(batch, entries)
+        final_hash = digest(journal / 'final.json')
+        html = journal / 'report.html'
+        html.unlink()
+        result = self.cli('report', journal.parent, '--json', code=2)
+        self.assertFalse(result['report_complete'])
+        rebuilt = self.cli('report', journal.parent, '--rebuild', '--json', code=2)
+        self.assertEqual(rebuilt['rebuilt_report_path'], str(journal / 'report.rebuilt.html'))
+        self.assertIn('批量回归', (journal / 'report.rebuilt.html').read_text())
+        self.assertFalse(html.exists())
+        self.assertEqual(final_hash, digest(journal / 'final.json'))
+
+    def test_batch_rebuild_marks_missing_child_report(self):
+        batch, entries = self.prepare([self.row()])
+        journal, state = run_batch(batch, entries)
+        child = Path(state['regressions'][0]['record_dir'])
+        (child / 'report.html').unlink()
+        output = self.cli('report', journal, '--rebuild', '--json', code=2)
+        self.assertFalse(output['report_complete'])
+        self.assertTrue(any('report.html' in issue for issue in output['issues']))
+        self.assertIn('原报告或证据不完整', (journal / 'report.rebuilt.html').read_text())
 
     def test_new_single_regression_preserves_previous_evidence(self):
         plan = self.plan()

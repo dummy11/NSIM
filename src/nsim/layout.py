@@ -168,6 +168,7 @@ def make_directory(path, root):
 
 @contextmanager
 def simulation_lock(path, root, plan):
+    existing = (path / OWNER_FILE).exists()
     make_directory(path, root)
     claim_product(path, plan, 'simulation')
     lock = path / '.run.lock'
@@ -179,7 +180,7 @@ def simulation_lock(path, root, plan):
         except BlockingIOError as exc:
             raise ConfigError(f'simulation directory is in use: {path}') from exc
         from nsim.lsf import check_reservations
-        check_reservations(path)
+        check_reservations(path, require_case_record=existing)
         check_environment_link(path, plan['project']['root'])
         yield stream
 

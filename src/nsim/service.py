@@ -102,8 +102,9 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
             if phase == 'sim':
                 plan.setdefault('build_refs', {})[task['id']] = {
                     'path': str(build), 'sha256': digest(build / 'build.json')}
-    if not dry_run and phase != 'com':
-        # Reserve every primary destination before replacing any existing result.
+    if not dry_run and phase != 'com' and not isolated_regression(plan):
+        # Shared/historical layouts still reserve all destinations up front.
+        # Isolated regressions prepare each case only inside its dispatch slot.
         for task in plan['tasks']:
             directories.reserve(record_root, task)
     if journal is not None:
@@ -116,6 +117,9 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
                   min_free_bytes=min_free_bytes, min_free_inodes=min_free_inodes,
                   output_roots=[str(p) for p in roots], record_dir=str(journal))
     plan["policy"] = policy
+    if any(submit['scheduler']['kind'] == 'lsf' for submit in plan['submits']):
+        from nsim.case_records import checksum
+        builds.lsf_plan_sha256 = checksum(plan)
     single = not dry_run and not is_regression(plan) and phase != 'com'
     if phase == 'com':
         (journal / "records").mkdir()
@@ -190,10 +194,10 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
                                         target, lifecycle='attempt_complete')
                     attempt['evidence'][str(target)] = write_json(target, value)
                     attempt['record_path'] = str(target)
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 attempt['case_record_error'] = str(exc)
-                attempt['case_record_failure'] = {'errno': exc.errno,
-                                                  'path': exc.filename or (str(target) if target else None),
+                attempt['case_record_failure'] = {'errno': getattr(exc, 'errno', None),
+                                                  'path': getattr(exc, 'filename', None) or (str(target) if target else None),
                                                   'message': str(exc)}
                 attempt['record_path'] = None
                 if attempt.get('terminal') is not False:

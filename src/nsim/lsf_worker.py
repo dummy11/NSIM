@@ -11,6 +11,7 @@ import threading
 import time
 
 from nsim.config import read_json
+from nsim.case_records import checksum, read_record
 from nsim.layout import validate_layout
 from nsim.planning import check_identity
 from nsim.hooks import execute_stage
@@ -19,9 +20,28 @@ from nsim.storage import digest, preflight, verify_files, write_json
 
 def execute_request(path, expected):
     path = Path(path)
-    if digest(path) != expected:
-        raise ValueError('worker request checksum changed')
-    request = read_json(path)
+    if path.name == 'run.json':
+        saved, _ = read_record(path)
+        job = saved['lsf']
+        request = job['request']
+        if checksum(request) != expected or job['request_sha256'] != expected:
+            raise ValueError('worker request checksum changed')
+        if job['terminal'] or job['token'] != request['token']:
+            raise ValueError('worker reservation already ended or changed')
+        from nsim.lsf_records import released
+        if released(path, job):
+            raise ValueError('worker reservation was released')
+        plan_path = Path(request['plan_ref']['path'])
+        plan = saved['plan'] if plan_path == path else read_json(plan_path)
+        if checksum(plan) != request['plan_ref']['sha256']:
+            raise ValueError('shared worker plan checksum changed')
+        plan = copy.deepcopy(plan)
+        plan['tasks'] = [next(t for t in plan['tasks'] if t['id'] == request['task_id'])]
+    else:
+        if digest(path) != expected:
+            raise ValueError('worker request checksum changed')
+        request = read_json(path)
+        plan = copy.deepcopy(request['plan'])
     record = {'schema_version': 1, 'token': request['token'], 'request_sha256': expected,
               'host': socket.gethostname(), 'pid': os.getpid(), 'started_at': time.time(),
               'exit_code': None, 'timed_out': False, 'cancelled': False, 'error': None}
@@ -31,7 +51,6 @@ def execute_request(path, expected):
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, stop)
     try:
-        plan = copy.deepcopy(request['plan'])
         for submit in plan['submits']:
             for source in submit.get('controller_inputs', []):
                 plan['input_hashes'].pop(source, None)
@@ -59,7 +78,7 @@ def execute_request(path, expected):
         record['error'] = str(exc)
     finally:
         record['ended_at'] = time.time()
-        write_json(path.parent / 'worker.json', record)
+        write_json(Path(request['result_path']) if request.get('result_path') else path.parent / 'worker.json', record)
     return 0 if record['error'] is None else 1
 
 

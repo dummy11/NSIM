@@ -478,7 +478,7 @@ nsim regr --project conv_verif -l /work/chip/conv_verif/smoke.caselist \
 nsim run --project conv_verif -sub rtl --case smoke -seed 42 -scheduler local
 ```
 
-N 限制整次调用已提交、尚未结束的作业，包含排队和暂停。任务完成回调触发补交，直到处理完全部任务；它不限制总提交次数。实际执行通过 bsub 提交、bjobs 查询和 bkill 取消；未知状态或取消未确认时保留占用、不自动重投。安装和输出必须在执行节点以相同路径可见。详细 submit 配置、运行预算、状态记录和异常处理见 [LSF 执行](docs/lsf_execution.md)。原生 adapter=vcs 仍仅预览，实际工程使用 command 包装器。
+N 限制整次调用已提交、尚未结束的作业，包含排队和暂停。任务完成回调触发补交，直到处理完全部任务；它不限制总提交次数。实际执行通过 bsub 提交、bjobs 查询和 bkill 取消；未知状态或取消未确认时保留占用、不自动重投。安装和输出必须在执行节点以相同路径可见。用 `nsim lsf inspect CASE_OR_COM_OR_REGR_DIR` 查看未解决占用，`--check-lsf` 查询当前集群；用 `nsim lsf release DIR --token TOKEN` 在核对身份和终态后只释放一个 job。释放不重启任务、不改原 case 结论。独立回归的 case 目录按 `--jobs` 派发进度逐个创建。详细 submit 配置、运行预算、状态记录和异常处理见 [LSF 执行](docs/lsf_execution.md)。原生 adapter=vcs 仍仅预览，实际工程使用 command 包装器。
 
 ## Hooks 与日志分析
 
@@ -525,10 +525,10 @@ nsim storage check /tmp/nsim-output --min-free-bytes 104857600
 
 可检测已返回的 I/O 错误、空间/inode 阈值和路径不可用；配额无法查询时标记 unknown，实际 EDQUOT 写入错误会被记录。目录预检会做一次小文件写入/readback/fsync，并在进程结束后复检。
 
-运行记录与仿真产物共用 output 存储。启动时选择首个健康输出根保存记录；运行期间若该记录目录不可写，立即停止派发并报错，不发布完成标记。备用输出可用于记录仍可写时的任务重试，不能保证整个输出盘丢失后恢复。不同目录不等于不同物理磁盘。若内核 I/O 陷入不可中断等待，应用层重试预算不能保证终止该系统调用。断电持久性、备份恢复、修盘及仿真断点续跑不在当前能力内。
+运行记录与仿真产物共用 output 存储。每次运行选择一个输出根；单 case 目录或记录错误只影响该 case，整批状态无法可靠保存时才停止新派发，不发布完成标记。nsim 不自动诊断磁盘损坏、隔离或切换目录；改用其他输出根需显式发起新运行。不能保证整个输出盘丢失后恢复。不同目录不等于不同物理磁盘。若内核 I/O 陷入不可中断等待，应用层重试预算不能保证终止该系统调用。断电持久性、备份恢复、修盘及仿真断点续跑不在当前能力内。
 
 ### case 记录合并
 
-单跑目录中的运行元数据统一为 schema 2 的 run.json：plan 是运行计划，task.attempts 保存执行历史，analysis 是结果摘要，state/terminal/checksums 保存整体状态与完整性校验。单跑不再生成 plan.json、state.json、final.json、analysis.json、attempt.json 或 records/ 副本。回归 case 的 run.json 引用公共 record_dir，公共计划与最终汇总仍在 report/。工具结果 result.json、hook 与 LSF 协议文件不属于上述合并范围。旧记录继续可读。
+单跑目录中的运行元数据统一为 schema 2 的 run.json：plan 是运行计划，task.attempts 保存执行历史，analysis 是结果摘要，state/terminal/checksums 保存整体状态与完整性校验。单跑不再生成 plan.json、state.json、final.json、analysis.json、attempt.json 或 records/ 副本。回归 case 的 run.json 引用公共 record_dir，公共计划与最终汇总仍在 report/。新 LSF 仿真将提交身份、固定请求、worker 结果和日志收集信息合入 `run.json.lsf`，不再永久保存每个 case 的 `job.json/request.json/controller.log`；运行中的临时文件集中在本轮 `.lsf` 交换目录。编译读者保护继续保留。工具结果 result.json、hook 和编译 job 记录仍单独保存，旧记录继续可读。
 
 查看分析可读取 run.json 的 analysis 字段；report、rerun、recover 的目录参数保持不变。分析或日志损坏会使有效 PASS 失效，控制记录不完整时拒绝自动重跑。回归实时界面只发布小型进度摘要，完整汇总不会每完成一个 case 就重写。

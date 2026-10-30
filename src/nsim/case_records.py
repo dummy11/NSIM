@@ -14,6 +14,14 @@ def checksum(value):
     return hashlib.sha256(encode(value)).hexdigest()
 
 
+def scheduler_summary(job):
+    """Keep task/report checkpoints bounded; full protocol lives in run.json.lsf."""
+    keys = ('schema_version', 'token', 'task_id', 'phase', 'job_id', 'name', 'status', 'terminal',
+            'record', 'owner', 'host', 'exit_code', 'created_at', 'ended_at', 'request_sha256',
+            'log_collection', 'error', 'cancel_reason')
+    return {key: job[key] for key in keys if key in job}
+
+
 def make_record(plan, task, path, state=None, lifecycle='running'):
     """Build from controller memory. Never reread a growing journal to update it.
 
@@ -26,12 +34,18 @@ def make_record(plan, task, path, state=None, lifecycle='running'):
         attempt['evidence'] = {p: h for p, h in attempt.get('evidence', {}).items()
                                if Path(p) != Path(path)}
     latest = task['attempts'][-1] if task['attempts'] else {}
+    lsf = latest.get('scheduler')
     submit = plan['submits'][task['submit']]
     value = dict(schema_version=2, kind='case', run_id=plan['id'], task_id=task['id'],
                  record_dir=plan['policy']['record_dir'], case=task['case'], seed=task['seed'],
                  submit=submit['name'], mode=submit['mode'], case_config=task.get('case_config'),
                  lifecycle=lifecycle, terminal=lifecycle == 'completed', task=task,
                  analysis=case_summary(task, latest) if latest and lifecycle != 'running' else None)
+    if lsf and lsf.get('phase') == 'simulate':
+        # One authoritative job/request document, with a small summary in the
+        # attempt for existing report consumers. No permanent job.json sidecar.
+        value['lsf'] = lsf
+        latest['scheduler'] = scheduler_summary(lsf)
     for key in ('build_dir', 'build_id', 'build_instance'):
         value[key] = latest.get(key)
     if not is_regression(plan) and Path(path).parent == Path(plan['policy']['record_dir']):

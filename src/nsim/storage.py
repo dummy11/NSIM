@@ -48,6 +48,19 @@ def write_json(path: Path, value):
     return hashlib.sha256(data).hexdigest()
 
 
+def sync_directory(path):
+    """Persist a critical rename/directory entry; unsupported filesystems fail closed.
+
+    Used at LSF submission/release boundaries, not on every local checkpoint.
+    POSIX fsync cannot promise more durability than the mounted filesystem does.
+    """
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def preflight(root: Path, min_free_bytes=0, min_free_inodes=0):
     """Roots must already exist: never recreate a missing mount point."""
     from nsim.config import integer

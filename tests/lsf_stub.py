@@ -2,6 +2,7 @@
 import fcntl
 import json
 import os
+import pwd
 from pathlib import Path
 import signal
 import shlex
@@ -41,6 +42,8 @@ def main():
             job = {'args': args, 'script': script, 'status': 'PEND', 'job_id': job_id,
                    'cwd': args[args.index('-cwd') + 1], 'stdout': args[args.index('-o') + 1],
                    'stderr': args[args.index('-e') + 1], 'worker_pid': None, 'queries': 0}
+            job.update(name=args[args.index('-J') + 1], owner=pwd.getpwuid(os.getuid()).pw_name,
+                       submit_time=str(time.time()), include_postproc=os.environ.get('LSB_JOB_INCLUDE_POSTPROC'))
             state['jobs'][job_id] = job
             event(state, 'SUBMIT', job_id)
             active = sum(j['status'] not in ('DONE', 'EXIT') for j in state['jobs'].values())
@@ -56,7 +59,12 @@ def main():
     if operation == 'bjobs':
         job_id = args[-1]
         with state_file(folder) as state:
-            job = state['jobs'].get(job_id)
+            if '-J' in args:
+                name = args[args.index('-J') + 1]
+                matches = [j for j in state['jobs'].values() if j['name'] == name]
+            else:
+                matches = [state['jobs'][job_id]] if job_id in state['jobs'] else []
+            job = matches[0] if matches else None
             if job is None:
                 print(json.dumps({'RECORDS': []}))
                 return 0
@@ -72,9 +80,17 @@ def main():
             if mode == 'missing':
                 print(json.dumps({'RECORDS': []}))
                 return 0
-            status = 'UNKWN' if mode == 'unknown' else job['status']
-            print(json.dumps({'RECORDS': [{'JOBID': job_id, 'STAT': status,
-                                          'EXIT_CODE': job.get('exit_code', '-'), 'EXEC_HOST': 'test-node'}]}))
+            rows = []
+            for match in matches:
+                rows.append({'JOBID': match['job_id'], 'STAT': 'UNKWN' if mode == 'unknown' else match['status'],
+                             'EXIT_CODE': match.get('exit_code', '-'), 'EXEC_HOST': 'test-node',
+                             'JOB_NAME': match['name'], 'USER': match['owner'], 'SUBMIT_TIME': match['submit_time'],
+                             'OUTPUT_FILE': match['stdout'], 'ERROR_FILE': match['stderr']})
+            for row in rows:
+                row.update(state.get('query_overrides', {}))
+            if state.get('duplicate_query') and rows:
+                rows.append(dict(rows[0]))
+            print(json.dumps({'RECORDS': rows}))
         return 0
     if operation == 'bkill':
         job_id = args[-1]
@@ -131,7 +147,8 @@ def main():
         with state_file(folder) as state:
             if state.get('malformed_worker'):
                 request_path = Path(shlex.split(job['script'].splitlines()[1])[-2])
-                worker_path = request_path.parent / 'worker.json'
+                worker_path = (Path(json.loads(request_path.read_text())['lsf']['request']['result_path'])
+                               if request_path.name == 'run.json' else request_path.parent / 'worker.json')
                 worker = json.loads(worker_path.read_text())
                 worker['timed_out'] = 'false'
                 worker_path.write_text(json.dumps(worker))

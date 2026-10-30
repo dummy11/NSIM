@@ -29,6 +29,8 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
     project_admin.add_commands(commands)
     from nsim.submit_commands import add_commands
     add_commands(commands)
+    from nsim.lsf_commands import add_commands as add_lsf_commands
+    add_lsf_commands(commands)
     capabilities = add_command(commands, 'capabilities', help='supported project schemas')
     add_argument(capabilities, '--json', action='store_true')
     info = add_command(commands, "version", help="Show the tool version for provenance records")
@@ -171,6 +173,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         if args.command == 'submit':
             from nsim.submit_commands import dispatch
+            return dispatch(args)
+        if args.command == 'lsf':
+            from nsim.lsf_commands import dispatch
             return dispatch(args)
         if args.command in ('bootstrap', 'list', 'status', 'update', 'switch'):
             return project_admin.dispatch(args)

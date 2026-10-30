@@ -9,9 +9,9 @@ import time
 import uuid
 
 from nsim.checks import ACCEPTED, evaluate
-from nsim.case_records import make_record
+from nsim.case_records import make_record, scheduler_summary
 from nsim.hooks import execute_stage, kill_group, spec
-from nsim.layout import make_directory
+from nsim.layout import is_regression, make_directory
 from nsim.lsf import LsfError, run_process
 from nsim.planning import check_identity
 from nsim.runtime import module_command
@@ -72,7 +72,7 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
         attempt.update(command=argv, cwd=str(work), result=str(result))
         run_record = work / 'run.json'
         attempt['record_path'] = str(run_record)
-        if not run_record.exists():
+        if not run_record.exists() and (submit['scheduler']['kind'] != 'lsf' or not manifest['ready']):
             operation = 'case_record_write'
             write_json(run_record, make_record(plan, dict(task, attempts=[*previous, attempt]), run_record))
         if not manifest['ready']:
@@ -82,9 +82,14 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
         timed_out = False
         operation = 'simulation'
         if submit['scheduler']['kind'] == 'lsf':
+            def save_job(job):
+                attempt['scheduler'] = job
+                value = make_record(plan, dict(task, attempts=[*previous, attempt]), run_record)
+                write_json(run_record, value)
             stage = run_process(plan, task, root, policy, argv, work, log_dir / 'run.log',
                                  log_dir / 'run.log', submit['timeout_seconds'], cancel,
-                                 'simulate', build=build, on_event=builds.on_event)
+                                 'simulate', build=build, on_event=builds.on_event, on_record=save_job,
+                                 plan_sha256=builds.lsf_plan_sha256)
             attempt.update(exit_code=stage['exit_code'], host=stage.get('host', stage['job'].get('host')),
                            started_at=stage.get('started_at'), scheduler=stage['job'])
             timed_out = stage['timed_out']
@@ -136,6 +141,8 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
     except LsfError as exc:
         attempt.update(verdict='CANCELLED' if exc.cancelled else 'SCHEDULER_ERROR' if exc.terminal else 'LSF_UNKNOWN',
                        reason=str(exc), terminal=exc.terminal, scheduler_record=exc.record)
+        if exc.job is not None:
+            attempt['scheduler'] = exc.job
         attempt['evidence'].update(exc.evidence)
         try:
             if exc.record and Path(exc.record).is_file():
@@ -155,7 +162,8 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
                     failure[label + '_exists'] = None
         attempt.update(verdict='INFRA_ERROR', reason=str(exc), failure=failure)
     except ValueError as exc:
-        attempt.update(verdict="INPUT_CHANGED", reason=str(exc))
+        attempt.update(verdict='INFRA_ERROR' if operation == 'simulation_setup' else 'INPUT_CHANGED',
+                       reason=str(exc))
     finally:
         if attempt["ended_at"] is None:
             attempt["ended_at"] = time.time()
@@ -173,4 +181,6 @@ def execute(plan, task, root, policy, cancel, directories, builds, previous=()):
                 if attempt.get('terminal') is not False:
                     attempt['verdict'] = 'INFRA_ERROR'
                 attempt['reason'] = (attempt.get('reason', '') + ' | case record write failed: ' + str(exc)).strip(' |')
+        if is_regression(plan) and attempt.get('scheduler', {}).get('request'):
+            attempt['scheduler'] = scheduler_summary(attempt['scheduler'])
     return attempt

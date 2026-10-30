@@ -36,6 +36,14 @@ nsim regr -l smoke.list -sub submit_0 -seed 42 -scheduler local -jobs 4
 
 `run/regr` 为同一 submit/输出根只编译一次，编译成功后各 case/seed 共用产物；编译作业也占并发额度。等待同一编译产物的任务不会另交编译作业，因依赖关系可能暂时未占满窗口。fake 准备和 prebuilt 输入登记不启动编译器，因此没有对应编译作业。
 
+## case 目录什么时候创建
+
+现代回归使用 `isolated-regression-v1` 独立目录布局。启动时创建本轮回归根和 `report/`，检查全部计划路径，并准备共享编译目录；**不预先创建全部 case 目录**。每个任务取得 `--jobs` 名额、通过编译准备后，才创建并锁定自己的 `sim_dir/case_seed/`，建立 `env`，写运行记录，再执行或提交仿真。目录创建或加锁失败仅记录为该 case 的问题，其他 case 继续。
+
+例如有一万个 case、`--jobs 8`，启动阶段只准备已派发任务的 case 目录；后续随名额空出逐个创建。若唯一名额被状态不明的 job 占用，后续 case 不会留下空目录。已完成 case 的目录仍保留，所以本轮最终执行完一万个 case 后仍会有一万个结果目录。单跑及旧的共享目录布局保留原有预先加锁规则，避免改变历史覆盖行为。
+
+local 的正常回归 case 通常有两次 `run.json` 逻辑写入（执行前、attempt 完成）；正常单跑通常有三次（开始、attempt 完成、单跑最终发布）。这不是物理磁盘 I/O 次数。LSF 额外在提交身份、job ID、未知/终态等关键节点落盘；普通 PEND/RUN 状态轮询不反复重写 `run.json`。
+
 ## Submit 配置
 
 在现有 submit JSON 中添加下面的 `scheduler` 对象即可；省略整个对象时也默认 LSF。
@@ -77,40 +85,90 @@ nsim regr -l smoke.list -sub submit_0 -seed 42 -scheduler local -jobs 4
 
 ## 状态、取消和证据
 
-实际提交包含唯一作业名、`-cwd`、独立 stdout/stderr 路径及队列/资源设置。提交成功后记录返回的正整数 job ID，使用 `bjobs -a -json -o "jobid stat exit_code exec_host" JOB_ID` 查询对应记录。LSF 客户端需要支持该 JSON 输出格式。
+实际提交包含 token 派生的作业名、`-cwd`、独立 stdout/stderr 路径及队列/资源设置。收到正整数 job ID 后，使用 `bjobs -a -json -o "jobid stat exit_code exec_host job_name user output_file error_file submit_time" JOB_ID` 查询。除了 ID，还核对完整作业名、提交用户、输出路径和已观察到的提交时间；同一个 ID 被复用或身份字段缺失都不能确认终态。客户端必须支持这些 JSON 字段，不能使用截断的作业名。
 
-DONE/EXIT 等明确终态才释放名额；PEND/RUN/暂停占用名额；UNKWN/ZOMBI、缺失记录、不可解析输出或查询失败都不能证明进程已停止。状态语义依据 [IBM bjobs 文档](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=bjobs-description)。短暂查询失败会继续查询；超过预算仍未知时，该 job 保留保护文件和一个 `--jobs` 名额，不自动重投或取消。其他已运行 job 继续；只有其余名额确实空闲时才提交新 job。`--jobs=1` 且唯一名额未知时，后续 case 显示未执行，不被伪记为取消；整轮不发布 `final.json`。
+DONE/EXIT 等明确终态才释放名额；PEND/RUN/暂停占名额；UNKWN/ZOMBI、缺失记录、不可解析输出或查询失败不能证明进程已停止。状态依据 [IBM bjobs 文档](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=bjobs-description)。连续查询未知超过预算后，该 job 保留占用和一个 `--jobs` 名额。其他空闲名额仍可补交；`--jobs=1` 且唯一名额未知时，后续 case 显示未执行，整轮不发布 `final.json`。
 
-`bsub` 无可靠 job ID 时，受理状态未知；仅在失败回执明确表示拒绝时记为已拒绝。未知受理保留名额与保护文件，不重复提交。单个 job 的提交、查询、执行或日志收集错误不会设置整批取消信号。Ctrl-C 和该 job 的调度等待超时可对已知 job ID 执行 `bkill`，随后继续查询，只有确认终态才解除目录占用。取消命令返回成功本身不算终态证据；不使用 `bkill -r`，因为强制从调度器移除不能证明操作系统进程已经终止。参见 [IBM 强制移除说明](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=jobs-forcefully-removing-job-from-lsf)。
+`bsub` 回复中没有可靠 ID，仍可能已经受理，不能自动重投。只有失败回执明确拒绝提交时才视为未提交。单个 job 的提交、查询、执行或日志收集错误不设置整批取消信号。Ctrl-C 或该 job 的调度等待超时可请求 `bkill`，但须先核对作业身份，之后再查询终态；取消命令成功本身不能解除占用。不使用 `bkill -r`，参见 [IBM 强制移除说明](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=jobs-forcefully-removing-job-from-lsf)。
 
-记录位于实际编译或仿真目录内，无需 event-root：
+新提交显式设置 `LSB_JOB_INCLUDE_POSTPROC=Y`，使调度终态包含集群后处理；不能把单纯的 DONE/EXIT 默认解释为后处理也结束。旧记录没有这个提交约定时，`release` 需要 PDONE/PERR/POST_DONE/POST_ERR 等明确的后处理终态，否则拒绝释放。具体环境仍须验收，尤其是跨集群转发。依据 [IBM 后处理配置](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=processing-configuration-modify-pre-post-execution) 与 [LSF 环境变量参考](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=variables-environment-variable-reference)。
+
+### 记录、token、ID 和占用分别是什么
+
+| 名称 | 通俗含义 | 保存位置/用途 |
+| --- | --- | --- |
+| token | nsim 在提交前生成的本次提交编号，32 位十六进制字符串；不是密码 | `run.json.lsf.token`；重跑产生新 token，`release` 精确选中它 |
+| job name | 向 LSF 提交的名字，形式为 `nsim_<token>` | ID 丢失时的查询线索；名字匹配后仍核对用户和输出路径 |
+| job ID | LSF 受理后返回的数字编号 | `run.json.lsf.job_id`；回复丢失时可为空 |
+| 占用 | “这个目录或编译产物可能仍被这个 job 使用”的保护 | 未确认停止时阻止覆盖；不是认定磁盘有故障 |
+| `run.json` | 单 case 的运行记录，同时保存新格式仿真 job 的身份、固定请求、状态和 worker 结果 | 新仿真不再另外生成 `job.json` 或 `.lsf-active.json` |
+| `job.json` | 旧格式及当前编译 job 的独立调度记录 | `com_dir/.lsf-jobs/<token>/job.json` 等旧位置，继续兼容读取 |
+| 编译读者记录 | 说明哪一个远程仿真仍可能读取这个编译产物 | `com_dir/.lsf-readers/<token>.json`；确认结束后删除对应一项 |
+
+`run.json.lsf.terminal` 表示调度 job 已确认结束；顶层 `terminal`/`lifecycle` 表示 case/控制器记录的生命周期。**调度结束、日志收集完整、case 通过是三个独立结论**，不能互相替代。
+
+### 新仿真的文件布局与写入顺序
 
 ```text
-com_dir/ 或 sim_dir/case_seed/
-  .lsf-jobs/<token>/
-    request.json       # 带哈希的执行请求
-    job.json           # job ID、提交回执、状态历史、取消诊断
-    worker.json        # 执行主机、退出状态、输入/存储检查结果
-    controller.log     # 提交、查询、取消及状态事件的内部中转
-    farm.out           # LSF worker 标准输出和作业报告，最终合入主日志
-    farm.err           # LSF worker 标准错误，最终合入主日志
-  .lsf-active.json     # 在途或状态不明的写入占用
-com_dir/.lsf-readers/  # 远程仿真对编译产物的占用记录
+regr_dir/<本轮目录>/
+  report/
+    plan.json, state.json, ...     # 本轮共用的计划/汇总
+    lsf.log                       # 本轮共用的控制日志，按 token 标记
+    .lsf/<token>/                 # 运行中的临时交换位置
+      worker.json                 # worker 结果
+      farm.out, farm.err          # LSF 输出
+  <submit>/<workspace>/
+    sim_dir/<case_seed>/
+      run.json                    # 内含 lsf 身份、固定请求与收集结果
+      run.log                     # 完整仿真主日志
+      ...                         # 正常工具结果和波形
+    com_dir/.lsf-readers/<token>.json
 ```
 
-主日志为 `compile.log`（编译）或 `run.log`（仿真），包含主命令和前后处理的 stdout/stderr，以及 LSF 提交、查询、取消命令及其输出、状态变化、执行主机、worker 结果、farm.out/farm.err 和作业报告。提交拒绝、启动失败或排队超时也能直接查看对应主日志。工具自身的 `-l` 日志分别为 `vcs.log`、`sim.log`，默认不重复扫描。
+单跑没有回归 `report/`，临时交换位置改为 `sim_dir/.lsf/<run-id>/<token>/`，共用日志为 `sim_dir/.lsf/<run-id>/lsf.log`。临时路径包含本次运行/token，不会被下一次同 case/seed 的运行复用。编译 job 数量较少，本次保留原有 `.lsf-jobs/<token>/` 请求、job、worker、控制日志和 farm 输出，以及 `.lsf-active.json`；不把可变读者列表塞进有哈希约束的 `build.json`。
 
-主日志在提交前创建，worker 追加执行输出；调度事件带时间戳，先写入内部中转文件，在 worker 分析结束、作业终态确认、LSF 输出文件稳定后追加到主日志尾部。这样不会让查询输出干扰日志稳定性判断，也不改变工具诊断行号。原始中转文件和机器记录继续保留作证据，用户无需逐个打开。LSF 可以在作业结束后才将临时输出复制回来，具体行为见 IBM 的 [-o](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=o-o) 和 [-e](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=o-e) 说明。
+每个仿真的顺序是：
 
-成功 worker 的 LSF 输出必须在 `result_wait_seconds` 内可见且稳定；缺失或合并过程中变化会返回调度错误，不能发布 PASS。合并前核对 worker 的执行日志哈希，合并后保存整份主日志及原始输出的哈希。worker 的日志分析记录描述合并前的执行内容；`job.json.log_collection` 描述完整主日志的收集结果。状态未确认时仅汇集当时可见内容，主日志明确标记不完整，目录占用继续保留。
+1. 取得名额并准备 case 目录，核对旧 `run.json`、旧标记及锁；受管旧目录的记录缺失/损坏时拒绝覆盖。
+2. 在 `run.json.lsf` 保存 token、作业名、提交意图和固定执行请求，保存编译读者记录，并同步关键目录项，然后才调用 `bsub`。写不进去就不提交。
+3. 收到 ID 后保存；回复丢失保留“可能已提交”的记录。worker 校验固定请求摘要、公共计划摘要、token 和编译产物后执行。回归请求引用公共 `plan.json`，不在每个 case 中复制整份回归计划。
+4. 查询到状态变化时更新内存和显示；关键结果落盘。控制日志使用批次共用文件，普通轮询不每次 `fsync`，提交与结束等关键节点同步。
+5. 确认调度终态、收齐结果并将输出合入 `run.log` 后，先保存结果和主日志摘要，再清理已被收集的临时 worker/farm 文件及本 token 的读者记录。状态不明或收集失败时保留临时证据。
 
-回归终端 Dashboard 和 `live.json` 保留最近作业的 job ID、阶段、状态与终态标记，最终报告保留全部作业。单跑保留机器记录；单个 com 可从 build.json 中的 scheduler 查看作业。
+这是减少永久小文件和每次轮询同步操作，不是取消所有 I/O。运行中仍需临时 worker/farm 文件、编译读者记录和原子写入的临时文件；每个已执行 case 最终仍有自己的结果目录。更多真实 NFS 性能数据须在目标环境测量。
 
-每个 case 的分析与执行记录保存后，控制器直接更新终端 Dashboard；LSF 查询到状态变化也会触发更新。DONE/EXIT 本身不能替代 case 判定。Dashboard 无定时轮询，不增加 LSF job；调度器自身的 bjobs 状态查询仍保留。见 [终端 Dashboard](dashboard.md)。
+主日志为 `compile.log` 或 `run.log`，工具自身日志为 `vcs.log` 或 `sim.log`。调度输出在 worker 分析完成后追加，不改变工具诊断行号。成功 worker 的 farm 输出必须在 `result_wait_seconds` 内可见且稳定，否则为调度错误，不能发布 PASS。新格式把 worker 结果和收集源的摘要内嵌到 `run.json.lsf`，报告只引用保留的主日志/结果，不能继续引用已清理的临时文件。LSF 输出回传行为见 IBM 的 [-o](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=o-o) 和 [-e](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=o-e) 说明。
 
-LSF DONE 只表示调度层结束。nsim 还要核对 worker 结果身份、执行退出码、声明的编译产物或仿真结构化结果、必需检查与输入身份，才能判为通过。缺失/损坏 worker 结果为 SCHEDULER_ERROR；状态无法确认则为 LSF_UNKNOWN，保留占用记录，不发布 final.json。
+回归终端 Dashboard 和 `live.json` 显示 job ID、阶段、状态与终态。DONE 本身不能代替 case 判定；worker 结果身份、退出码、必需检查与输入身份仍要校验，见 [终端 Dashboard](dashboard.md)。
 
-控制器被强制杀死、提交回执丢失、取消无法确认时，占用记录会保留，阻止覆盖原仿真目录或重建被使用的编译目录。此类记录不支持自动 rerun/recover。应先由操作人员依据 job.json 的 job ID 或唯一作业名向集群核实实际进程已结束，再处理残留占用；不能只依据控制器已经退出而删除。其他目录仍可独立使用。
+## 检查与安全释放
+
+```sh
+# 只读查看本地保存的占用，不查询 LSF
+nsim lsf inspect /data/output/regr_dir/本轮目录
+nsim lsf inspect /data/output/base/rtl/sim_dir/smoke_42
+nsim lsf inspect /data/output/base/rtl/com_dir
+
+# 增加当前集群查询，分别显示保存状态和本次查询状态
+nsim lsf inspect /data/output/regr_dir/本轮目录 --check-lsf --json
+
+# 将 TOKEN 替换为 inspect 给出的完整 32 位 token
+nsim lsf release /data/output/regr_dir/本轮目录 --token TOKEN
+```
+
+目录参数可为单个 case 目录、`com_dir`、单轮回归目录或其中的 `report/`。回归检查根据计划列出相关 case 和编译目录；`com_dir` 检查编译 job 及其全部仿真读者。批量回归请选其中一轮的目录，不递归猜测任意输出根。`report/` 是公共汇总目录，不是每个 job 的记录目录。
+
+`inspect` 只读，默认列出未解决占用及异常记录，显示 token、job ID（若有）、保存状态、保护路径和缺失/损坏/冲突信息。`--check-lsf` 才查询当前集群，不写回旧记录。延迟创建尚未派发的 case 显示为未创建；已派发但记录缺失的情况明确提示，不能把不完整扫描当作“没有占用”。检查完整返回 0（即使仍有占用），记录或查询异常返回 2。
+
+`release` 每次只处理一个明确 token，重新读取记录并取得 case 独占锁和编译保护锁，再重新查询集群，**不使用上一次 inspect 的查询结果直接解锁**。作业仍活动、查询失败、没有匹配项、多个同名匹配、身份不符、记录损坏、其他控制器持锁，均拒绝释放。没有 `--force` 或超时强制释放选项。ID 缺失时按完整作业名查询并核对用户和唯一输出路径；查不到不代表 job 已结束。当前不会自动解析 `bhist/bacct` 历史档案，超出 bjobs 保留范围的 job 需管理员进一步调查，使用新目录也可继续独立工作。
+
+释放前写 `.lsf-release-<token>.json` 处理记录，绑定原记录摘要、实时查询证据、用户和保护路径；仅删除对应 token 的旧标记/编译读者，最后提交释放结论。中断时保留可重试的状态。正常 case 不增加这个文件；它只用于事后异常释放。原 `run.json`、旧 `job.json`、回归状态和原 PASS/FAIL 结论不改，避免破坏历史证据哈希。重复释放已经成功的 token 返回已释放，不重新提交、不取消作业。
+
+释放占用不等于补齐结果，原先不完整的回归不会因此自动获得 `final.json`。`report --rebuild` 仍只收集可校验的已有证据。若需再执行，必须显式发起新运行；`rerun/recover` 仍遵守原有完整终态记录要求。
+
+旧标记和 `job.json` 不批量删除或迁移。只有标记、没有可校验 job 记录时，inspect 尽量显示剩余 token 和路径，但 release 拒绝猜测。所有记录和 ID 都丢失时，nsim 无法自行证明目录空闲。旧版本不认识新 `run.json` 占用协议，与旧版本并行运行必须使用互不重叠的输出目录。
+
+关键 LSF 提交和释放使用文件同步及父目录 `fsync`；不支持目录同步的文件系统会明确失败。POSIX 同步与锁的真实跨主机/断电保证取决于挂载和服务端实现，本地测试不证明 NFS 已通过验收。
 
 ## 集群工作环境
 

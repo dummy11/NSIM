@@ -236,15 +236,21 @@ def commands(plan, task, root, attempt='preview'):
     config = submit['scheduler']
     result['scheduler'] = {'kind': config['kind']}
     if config['kind'] == 'lsf':
+        from nsim.lsf import QUERY_FIELDS
+        from nsim.layout import is_regression, record_directory
         cwd = build if phase == 'com' else work
-        argv = [config['bsub'], '-cwd', str(cwd), '-o', str(cwd / 'farm.out'), '-e', str(cwd / 'farm.err')]
+        spool = (cwd / '.lsf-jobs' / '<token>' if phase == 'com' else
+                 record_directory(root, plan) / '.lsf' / '<token>' if is_regression(plan) else
+                 cwd.parent / '.lsf' / plan['id'] / '<token>')
+        argv = [config['bsub'], '-J', 'nsim_<token>', '-cwd', str(cwd),
+                '-o', str(spool / 'farm.out'), '-e', str(spool / 'farm.err')]
         if config.get('queue'):
             argv += ['-q', config['queue']]
         for expression in config['resources']:
             argv += ['-R', expression]
         if config['licenses']:
             argv += ['-R', 'rusage[' + ':'.join(f'{k}={v}' for k, v in sorted(config['licenses'].items())) + ']']
-        result['scheduler'].update(submit_argv=argv, query_argv=[config['bjobs'], '-a', '-json', '-o', 'jobid stat exit_code exec_host', '<job-id>'],
+        result['scheduler'].update(submit_argv=argv, query_argv=[config['bjobs'], '-a', '-json', '-o', QUERY_FIELDS, '<job-id>'],
                                    cancel_argv=[config['bkill'], '<job-id>'], worker='execute-node preflight -> ' +
                                    {'com': 'compile', 'sim': 'reuse compile -> simulate -> checker',
                                     'run': 'compile -> simulate -> checker',
@@ -253,5 +259,5 @@ def commands(plan, task, root, attempt='preview'):
                                    main_log=str(cwd / ('compile.log' if phase == 'com' else 'run.log')),
                                    log_collection='append scheduler and farm output after worker analysis and confirmed terminal state',
                                    max_unfinished_jobs=plan.get('policy', {}).get('jobs', 1),
-                                   environment={'LSB_EXIT_IF_CWD_NOTEXIST': 'Y'})
+                                   environment={'LSB_EXIT_IF_CWD_NOTEXIST': 'Y', 'LSB_JOB_INCLUDE_POSTPROC': 'Y'})
     return result

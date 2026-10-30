@@ -61,6 +61,7 @@ class Builds:
         self.entries = {}
         self.reserved = {}
         self.on_event = None
+        self.lsf_plan_sha256 = None
 
     def __enter__(self):
         return self

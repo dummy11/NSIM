@@ -19,7 +19,7 @@ from nsim.service import run
 from nsim.storage import write_json
 
 
-class LsfTests(Fixture):
+class LsfFixture(Fixture):
     def setUp(self):
         super().setUp()
         self.farm = self.base / 'farm'
@@ -50,24 +50,6 @@ class LsfTests(Fixture):
         with state_file(self.farm) as state:
             state.update(values)
 
-    def test_worker_consumes_declared_file_and_records_phase_identity(self):
-        data = self.base / 'external_stimulus.txt'
-        data.write_text('recorded input')
-        self.data['files'] = {'stimulus': {'path': str(data), 'phases': ['simulate']}}
-        self.data['hooks'] = {'pre_sim': {'name': 'read_input', 'argv': [sys.executable, '-c',
-            'from pathlib import Path; import sys; assert Path(sys.argv[1]).read_text() == "recorded input"',
-            '{file:stimulus}']}}
-        self.save_submit()
-        plan = create_plan(self.project, cases=['smoke'], submit_paths=[self.submit], seeds=[42])
-        record, state = run(plan, [self.out])
-        self.assertTrue(state['passed'], state)
-        requests = list(Path(record).rglob('request.json'))
-        self.assertTrue(requests)
-        request = json.loads(requests[0].read_text())
-        self.assertIn(str(data), request['plan']['input_hashes'])
-        self.assertNotIn(str(data), request['plan']['submits'][0]['build_inputs'])
-        self.assertIn(str(data), request['stage']['read_only_roots'])
-
     def stop_workers(self):
         state = self.farm_state()
         for job in state['jobs'].values():
@@ -81,6 +63,25 @@ class LsfTests(Fixture):
             if all(j['status'] in ('DONE', 'EXIT') for j in self.farm_state()['jobs'].values()):
                 break
             time.sleep(.03)
+
+
+class LsfTests(LsfFixture):
+    def test_worker_consumes_declared_file_and_records_phase_identity(self):
+        data = self.base / 'external_stimulus.txt'
+        data.write_text('recorded input')
+        self.data['files'] = {'stimulus': {'path': str(data), 'phases': ['simulate']}}
+        self.data['hooks'] = {'pre_sim': {'name': 'read_input', 'argv': [sys.executable, '-c',
+            'from pathlib import Path; import sys; assert Path(sys.argv[1]).read_text() == "recorded input"',
+            '{file:stimulus}']}}
+        self.save_submit()
+        plan = create_plan(self.project, cases=['smoke'], submit_paths=[self.submit], seeds=[42])
+        record, state = run(plan, [self.out])
+        self.assertTrue(state['passed'], state)
+        saved = json.loads((record / 'run.json').read_text())
+        request = saved['lsf']['request']
+        self.assertIn(str(data), saved['plan']['input_hashes'])
+        self.assertNotIn(str(data), saved['plan']['submits'][0]['build_inputs'])
+        self.assertIn(str(data), request['stage']['read_only_roots'])
 
     def test_default_lsf_completion_hook_refills_global_window_and_queue(self):
         self.cases.write_text('slow\nfast\nthird\nfourth\nfifth\n')
@@ -140,7 +141,7 @@ class LsfTests(Fixture):
         self.assertEqual([task['status'] for task in state['tasks']],
                          ['completed', 'planned', 'planned'])
         self.assertIn('not executed', state['tasks'][1]['pending_reason'])
-        self.assertTrue(list(self.out.rglob('.lsf-active.json')))
+        self.assertTrue(list(self.out.rglob('.lsf-readers/*.json')))
         self.assertTrue(list(self.out.rglob('.lsf-readers/*.json')))
         saved = json.loads((record / 'plan.json').read_text())
         with self.assertRaisesRegex(ConfigError, 'reservation|still consume'):
@@ -165,7 +166,7 @@ class LsfTests(Fixture):
                          ['LSF_UNKNOWN', 'PASS', 'PASS'])
         self.assertEqual(len(self.farm_state()['jobs']), 3)
         self.assertLessEqual(self.farm_state()['peak'], 2)
-        self.assertTrue(list(self.out.rglob('.lsf-active.json')))
+        self.assertTrue(list(self.out.rglob('.lsf-readers/*.json')))
 
     def test_explicit_rejection_affects_only_one_job(self):
         self.configure(reject_attempts=[1])
@@ -192,21 +193,22 @@ class LsfTests(Fixture):
 
     def test_job_record_failure_after_submit_keeps_one_slot(self):
         from nsim import lsf
-        original = lsf.write_json
+        from nsim import runner
+        original = runner.write_json
         plan = self.plan()
         first_task = plan['tasks'][0]['id']
         def fail_status(path, value):
-            if (path.name == 'job.json' and value.get('task_id') == first_task
-                    and value.get('status') == 'SUBMITTED'):
+            if (path.name == 'run.json' and value.get('task_id') == first_task
+                    and value.get('lsf', {}).get('status') == 'SUBMITTED'):
                 raise OSError('job status write failed')
             return original(path, value)
-        with patch('nsim.lsf.write_json', side_effect=fail_status):
+        with patch('nsim.runner.write_json', side_effect=fail_status):
             record, state = run(plan, [self.out], jobs=2)
         self.assertFalse(state['terminal'])
         self.assertFalse((record / 'final.json').exists())
         self.assertEqual([task['effective_verdict'] for task in state['tasks']],
                          ['LSF_UNKNOWN', 'PASS', 'PASS'])
-        self.assertTrue(list(self.out.rglob('.lsf-active.json')))
+        self.assertTrue(list(self.out.rglob('.lsf-readers/*.json')))
         self.assertLessEqual(self.farm_state()['peak'], 2)
 
     def test_failed_job_record_read_does_not_cancel_other_jobs(self):
@@ -214,7 +216,7 @@ class LsfTests(Fixture):
         self.configure(reject_attempts=[1])
         original = runner.digest
         def fail_first_record(path):
-            if Path(path).name == 'job.json' and 'smoke_42' in str(path):
+            if Path(path).name == 'run.json' and 'smoke_42' in str(path):
                 raise OSError('job record read failed')
             return original(path)
         with patch('nsim.runner.digest', side_effect=fail_first_record):
@@ -265,7 +267,7 @@ class LsfTests(Fixture):
         _, state = run(self.plan(), [self.out], jobs=2)
         self.assertFalse(state['terminal'])
         self.assertLessEqual(len(self.farm_state()['jobs']), 2)
-        self.assertTrue(list(self.out.rglob('.lsf-active.json')))
+        self.assertTrue(list(self.out.rglob('.lsf-readers/*.json')))
 
     def test_pending_deadline_cancels_and_confirms_before_releasing(self):
         self.configure(pending_seconds=3)

@@ -1,6 +1,7 @@
 """Collect scheduler output after stage analysis, preserving diagnostic line numbers."""
 
 import hashlib
+import fcntl
 from datetime import datetime, timezone
 import json
 import os
@@ -13,10 +14,16 @@ from nsim.storage import digest
 
 
 class Transcript:
-    def __init__(self, main, directory, phase, argv):
+    def __init__(self, main, directory, phase, argv, token=None, shared_control=None):
         self.main = Path(main)
         self.directory = Path(directory)
-        self.control = self.directory / 'controller.log'
+        self.control = Path(shared_control) if shared_control else self.directory / 'controller.log'
+        self.shared = shared_control is not None
+        self.token = token
+        self.spans = []
+        self.sources = []
+        if self.control.is_symlink():
+            raise ConfigError('LSF controller log must not be a symlink')
         if self.main.is_symlink():
             raise ConfigError('stage log must not be a symlink')
         self.main.write_text(f'[nsim LSF] {phase}: submission starting; scheduler output follows stage output.\n')
@@ -24,10 +31,19 @@ class Transcript:
 
     def event(self, label, value):
         with self.control.open('ab') as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            start = stream.seek(0, os.SEEK_END)
             timestamp = datetime.now(timezone.utc).isoformat(timespec='milliseconds')
-            stream.write((f'\n[nsim LSF {timestamp}] {label}\n' +
+            stream.write((f'\n[nsim LSF {timestamp} token={self.token}] {label}\n' +
                           (value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)) + '\n').encode())
             stream.flush()
+            self.spans.append((start, stream.tell() - start))
+            if not self.shared:
+                os.fsync(stream.fileno())
+
+    def checkpoint(self):
+        """Critical milestones are durable; routine polling does not fsync."""
+        with self.control.open('rb') as stream:
             os.fsync(stream.fileno())
 
     def output(self, result):
@@ -95,7 +111,7 @@ class Transcript:
         evidence = {}
         with self.main.open('ab') as output:
             for name in ('controller.log', 'farm.out', 'farm.err'):
-                source = self.directory / name
+                source = self.control if name == 'controller.log' else self.directory / name
                 output.write(f'\n[nsim LSF] BEGIN {name}\n'.encode())
                 if name != 'controller.log' and name not in current:
                     output.write(b'[nsim LSF] no output file available\n')
@@ -104,16 +120,21 @@ class Transcript:
                     size = info.st_size if name == 'controller.log' else current[name][1]
                     hashed = hashlib.sha256()
                     with source.open('rb') as stream:
-                        remaining = size
-                        while remaining:
-                            chunk = stream.read(min(1024 * 1024, remaining))
-                            if not chunk:
-                                issues.append(f'LSF output truncated while collecting {name}')
-                                break
-                            output.write(chunk)
-                            hashed.update(chunk)
-                            remaining -= len(chunk)
-                    evidence[str(source)] = hashed.hexdigest()
+                        spans = self.spans if name == 'controller.log' and self.shared else [(0, size)]
+                        for offset, remaining in spans:
+                            stream.seek(offset)
+                            while remaining:
+                                chunk = stream.read(min(1024 * 1024, remaining))
+                                if not chunk:
+                                    issues.append(f'LSF output truncated while collecting {name}')
+                                    break
+                                output.write(chunk)
+                                hashed.update(chunk)
+                                remaining -= len(chunk)
+                    self.sources.append(dict(name=name, sha256=hashed.hexdigest(),
+                                             bytes=sum(length for _, length in spans)))
+                    if not self.shared:
+                        evidence[str(source)] = hashed.hexdigest()
                 output.write(f'\n[nsim LSF] END {name}\n'.encode())
             if terminal and current != self.snapshot():
                 issues.append('LSF output changed during collection')

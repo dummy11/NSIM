@@ -348,9 +348,10 @@ class HookTests(Fixture):
         self.assertEqual(state['tasks'][0]['effective_verdict'], 'FAIL', state)
         farm_state = json.loads((farm/'state.json').read_text())
         self.assertEqual(len(farm_state['jobs']), 2)  # compile + sim only, no extra hook/analysis jobs
-        analysis = json.loads((record/'run.json').read_text())['analysis']
-        jobs = list((record/'.lsf-jobs').glob('*/worker.json'))
-        worker = json.loads(jobs[0].read_text())
+        saved = json.loads((record/'run.json').read_text())
+        analysis = saved['analysis']
+        worker = saved['lsf']['worker']
+        self.assertFalse((record / '.lsf-jobs').exists())
         self.assertNotIn('simulation_analysis', worker)
         self.assertNotIn('diagnostics', worker['log_analysis'])
         self.assertNotIn('message', worker['log_analysis']['first_failure'])

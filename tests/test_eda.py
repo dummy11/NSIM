@@ -46,6 +46,28 @@ class EdaPreviewTests(Fixture):
         self.assertEqual(len(task['unresolved_tools']), 4)
         self.assertNotIn('-q', task['scheduler']['submit_argv'])
 
+    def test_fsdb_switch_changes_run_arguments_without_changing_build_identity(self):
+        self.data['vcs']['fsdb'] = False
+        self.save_submit()
+        without_waves = self.plan(allow_missing_tools=True)
+        task = without_waves['tasks'][0]
+        disabled = commands(without_waves, task, self.out)
+
+        self.data['vcs']['fsdb'] = True
+        self.save_submit()
+        with_waves = self.plan(allow_missing_tools=True)
+        with_waves['id'] = without_waves['id']
+        enabled = commands(with_waves, with_waves['tasks'][0], self.out)
+        self.assertEqual(task['build_id'], with_waves['tasks'][0]['build_id'])
+        self.assertEqual(disabled['compile']['argv'], enabled['compile']['argv'])
+        self.assertNotIn('+fsdb', disabled['simulate'])
+        self.assertIn('+fsdb', enabled['simulate'])
+
+        self.data['vcs']['compile_args'].append('-debug_access+all')
+        self.save_submit()
+        debug_build = self.plan(allow_missing_tools=True)
+        self.assertNotEqual(task['build_id'], debug_build['tasks'][0]['build_id'])
+
     def test_native_log_flag_cannot_overwrite_stage_transcript(self):
         for key, target in (('compile_args', 'compile.log'), ('run_args', 'run.log')):
             with self.subTest(key=key):

@@ -264,7 +264,7 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
             compile_config['prebuilt_argv'] = submit['argv']
         if submit['adapter'] == 'vcs':
             compile_config['vcs'] = {k: v for k, v in submit['vcs'].items()
-                                     if k not in {'run_args', 'result_argv', 'verdi', 'fsdb_file', 'fsdb_plusargs'}}
+                                     if k not in {'run_args', 'result_argv', 'verdi', 'fsdb', 'fsdb_file', 'fsdb_plusargs'}}
         submit['build_inputs'] = {str(p): hashes[str(p)] for p in sorted(compile_inputs[index])}
         submit['build_config'] = compile_config
         build_id = hashlib.sha256(encode({'config': compile_config, 'inputs': submit['build_inputs'],

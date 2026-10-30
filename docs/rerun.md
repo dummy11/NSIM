@@ -24,6 +24,8 @@ nsim rerun /data/output/base/rtl/sim_dir/smoke_42 --rebuild
 它读取当前工程和 submit，沿用原 case/seed 与原 CLI plusargs。编译产物缺失、损坏、
 被替换，或与当前编译输入不兼容时，默认报错并提示 `--rebuild`，绝不自动转为编译。
 只有运行阶段输入改变且编译身份仍兼容时，可以不重新编译。
+切换 `vcs.fsdb` 只改变运行参数，本身不要求重新编译；若同时修改 TB 或编译调试选项，
+仍需 `--rebuild`。生成 FSDB 还取决于工程已有的 dump 逻辑与编译配置。
 只有预构建产物的 command submit 可以校验复用，但不能使用 `--rebuild`。
 
 复用会在共享读锁下校验原 `build.json` 及产物，再复制到本次独立 `com_dir`，不使用

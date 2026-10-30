@@ -351,7 +351,7 @@ bsub/bjobs/bkill/worker_python 指定工具；poll/deadline/cancel/command_timeo
 均为至少 0.01 的秒数，分别控制轮询、总运行预算、取消确认、调度命令、未知状态与结果等待。
 local 不调用 LSF 工具。命令行队列覆盖发生在继承合并之后。
 
-fsdb 控制是否附加 fsdb_plusargs，fsdb_file 指定波形路径，verdi 指定查看器。
+fsdb 只控制是否附加 fsdb_plusargs，不改变编译命令或编译身份；能否生成 FSDB 取决于 TB 和工具编译配置。fsdb_file 指定波形路径，verdi 指定查看器。
 dpi 可省略或为 null；makefile 相对工程根，make/cc/cxx 指定工具，scope 支持 project/regression/run，
 target 为安全名称，args 为传给 make 的附加参数，timeout_seconds 至少 0.01。
 result_argv 为结果转换/检查命令；空数组表示不配置该命令。真实结果须满足 nsim 结果协议。

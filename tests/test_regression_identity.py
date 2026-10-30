@@ -98,7 +98,7 @@ class RegressionIdentityTests(Fixture):
         original_digest = digest(record / 'final.json')
         retried, state = replay(record)
         saved = json.loads((retried / 'plan.json').read_text())
-        self.assertTrue(saved['id'].startswith('smoke_20261029T153000_'))
+        self.assertTrue(saved['id'].startswith('rerun_20261029T153000_'))
         self.assertNotEqual(retried, record)
         self.assertEqual(saved['source']['id'], plan['id'])
         self.assertEqual(saved['source']['mode'], 'rerun')
@@ -116,7 +116,7 @@ class RegressionIdentityTests(Fixture):
         recovered, result = replay(record, roots=[self.backup], recovery=True)
         saved = json.loads((recovered / 'plan.json').read_text())
         self.assertTrue(result['passed'])
-        self.assertTrue(saved['id'].startswith('smoke_20261030T100000_'))
+        self.assertTrue(saved['id'].startswith('recover_20261030T100000_'))
         self.assertEqual(saved['source']['id'], state['id'])
         self.assertEqual(saved['source']['mode'], 'recover')
 

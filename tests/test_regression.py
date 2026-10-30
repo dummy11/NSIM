@@ -347,8 +347,9 @@ class StorageRecoveryTests(Fixture):
             journal, state = run(self.plan(), [self.out])
         self.assertFalse(state["passed"])
         self.assertEqual(len(state["tasks"][0]["attempts"]), 1)
-        _, recovered = replay(journal, roots=[self.backup], recovery=True)
-        self.assertTrue(recovered["passed"])
+        result, recovered = replay(journal, roots=[self.backup], recovery=True)
+        self.assertEqual(result.parent.parent, self.backup / 'regr_dir' / journal.parent.name)
+        self.assertTrue(recovered['passed'])
 
     def test_removed_automatic_retry_options_are_rejected(self):
         with self.assertRaisesRegex(ConfigError, 'automatic infrastructure retries'):
@@ -413,8 +414,12 @@ class StorageRecoveryTests(Fixture):
         self.assertTrue(state["report_errors"])
         self.assertFalse(load_final(journal)[1]["passed"])
         self.assertEqual(list(self.out.rglob("complete.json")), [])
-        _, recovered = replay(journal, roots=[self.backup], recovery=True)
-        self.assertTrue(recovered["passed"])
+        result, recovered = replay(journal, roots=[self.backup], recovery=True)
+        self.assertIsNone(result)
+        self.assertEqual(recovered['tasks'], [])
+        from nsim.report_command import report
+        summary, code = report(journal, rebuild=True, as_json=True)
+        self.assertEqual(code, 0, summary)
 
     def test_local_launch_error_does_not_block_later_cases(self):
         from nsim import runner

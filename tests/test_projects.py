@@ -214,7 +214,7 @@ class ProjectTests(unittest.TestCase):
         self.cli('update', '--project', 'verification', '--output-root', 'new-output')
         result = self.cli('rerun', journal, success=False)
         replay_journal = Path(json.loads(result.stdout)['journal'])
-        self.assertEqual(replay_journal.parent.parent, self.base / 'output' / 'fake' / 'rtl' / 'rerun')
+        self.assertEqual(replay_journal.parent.parent, self.base / 'output' / 'fake' / 'rtl')
         self.assertEqual(json.loads((replay_journal / 'plan.json').read_text())['policy']['output_roots'],
                          [str(self.base / 'output')])
         replay_plan = json.loads((replay_journal / 'plan.json').read_text())

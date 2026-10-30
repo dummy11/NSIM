@@ -1,6 +1,6 @@
 # 修复后的失败 case 重跑
 
-`nsim rerun SOURCE` 从已结束且控制记录校验通过的来源中选取最终未通过任务，固定
+`nsim rerun SOURCE` 从已结束且控制记录校验通过的来源中选取完整执行但结果失败的任务，固定
 **case、seed 和 submit 选择**，读取当前输入，强制重新编译后完整执行仿真与检查。
 不需要人工判断修改属于编译、仿真还是结果检查阶段。
 
@@ -14,8 +14,8 @@ nsim rr /data/output/regr_dir/<原回归ID>/<submit>/rtl/sim_dir/<case>_<seed>
 ```
 
 批量回归需先选择其中的具体回归，不直接接受 regr_batch_dir 下的批次总目录。
-没有未通过任务时不创建目录、不编译。报告发布失败但所有任务均通过时，使用
-`report --rebuild` 重建展示或按历史规则执行 `recover`。
+没有匹配任务时不创建目录、不编译。报告展示文件损坏但任务结果完整时，使用
+`report --rebuild` 手动重建。
 
 ## 输入与编译
 
@@ -43,27 +43,26 @@ rerun 不接受 `-seed/--seed/-S`、`-repeat`、`-o/--output-root`（包括全�
 regr_dir/<原回归ID>/
 ├── report/                         # 原报告保持原样
 ├── <submit>/rtl/                   # 原编译、日志、结果、波形保持原样
-└── rerun/
-    ├── <新回归ID_1>/
-    │   ├── report/                 # 独立计划、状态、报告与完成校验
-    │   └── <submit>/rtl/
-    │       ├── com_dir/
-    │       └── sim_dir/<case>_<seed>/
-    └── <新回归ID_2>/
+├── rerun_<时间_UUID>/
+│   ├── report/                     # 独立计划、状态、报告与完成校验
+│   └── <submit>/rtl/
+│       ├── com_dir/
+│       └── sim_dir/<case>_<seed>/
+└── recover_<时间_UUID>/report/
 ```
 
-新 ID 继续使用清单名、时间戳与 UUID；目录已存在时拒绝接管。重跑保留来源工作区名，
+新目录默认使用操作名、时间戳与 UUID；`-dir` 可指定单个目录名，目录已存在时拒绝接管。重跑保留来源工作区名，
 编译和仿真使用新目录内的 com_dir、sim_dir，不复用原绝对路径或自定义产物路径。
 返回的 record_dir 指向新 report；report 与单 case 的 run.json 均能读取新结果。
 
-对一次 rerun 的失败结果再次 rerun 时，在同一原回归的 rerun/ 下创建新的同级目录，
+对一次 rerun 的失败结果再次 rerun 时，在同一原回归下创建新的同级目录，
 parent 指向直接来源任务。原回归及其批次报告不会因为重跑通过而改成 PASS。
-单跑来源没有回归根时，在原 submit 工作区的 rerun/<ID>/ 下生成同样的独立回归结构，
+单跑来源没有回归根时，在原 submit 工作区的 rerun_<时间_UUID>/ 下生成同样的独立回归结构，
 不覆盖来源 case 目录。删除原回归或单跑工作区会连同其中的 rerun 结果一起删除。
 
 ## 与 recover 的区别
 
-recover 保持历史输入恢复语义，校验原输入与运行时，保留原执行阶段，选择存储/证据
-失败任务（报告发布失败时按原规则恢复）。它仍支持输出根和 seed 覆盖；sim 恢复要求
+recover 保持历史输入恢复语义，校验原输入与运行时，保留原执行阶段，选择未形成完整结果的
+失败任务。它仍支持输出根和 seed 覆盖；sim 恢复要求
 原编译可验证，不自动编译。rerun 和 recover 都要求来源具有可信终态，不绕过未知 LSF
-作业或损坏控制记录的检查。
+作业或损坏控制记录的检查。完整的目录与手动报告汇总规则见 [重跑、恢复与报告](replay_reports.md)。

@@ -52,7 +52,7 @@ Path(result).write_text(json.dumps({'schema_version': 1, 'case': case, 'seed': i
         plan, _ = load_final(repeated)
         self.assertTrue(state['passed'], state)
         self.assertEqual({(t['case'], t['seed']) for t in state['tasks']}, {('fast', 42), ('smoke', 43)})
-        self.assertEqual(repeated.parent.parent, record.parent / 'rerun')
+        self.assertEqual(repeated.parent.parent, record.parent)
         self.assertEqual((self.base / 'count').read_text(), 'compile\ncompile\n')
         self.assertEqual({t['attempts'][0]['build_instance'] for t in state['tasks']},
                          {state['tasks'][0]['attempts'][0]['build_instance']})
@@ -79,7 +79,7 @@ Path(result).write_text(json.dumps({'schema_version': 1, 'case': case, 'seed': i
         task = next(t for t in original['tasks'] if t['case'] == 'fast')
         first, _ = replay(simulation_directory(self.out, original, task))
         second, result = replay(first)
-        self.assertEqual(first.parent.parent, record.parent / 'rerun')
+        self.assertEqual(first.parent.parent, record.parent)
         self.assertEqual(second.parent.parent, first.parent.parent)
         self.assertEqual(result['tasks'][0]['parent']['run'], load_final(first)[0]['id'])
 
@@ -116,7 +116,7 @@ Path(result).write_text(json.dumps({'schema_version': 1, 'case': case, 'seed': i
         repeated, state = replay(record, jobs=2)
         self.assertTrue(state['passed'], state)
         self.assertEqual((farm.base / 'count').read_text(), 'compile\ncompile\n')
-        self.assertEqual(repeated.parent.parent, record.parent / 'rerun')
+        self.assertEqual(repeated.parent.parent, record.parent)
         self.assertTrue(load_final(repeated)[1]['passed'])
         jobs = list(farm.farm_state()['jobs'].values())
         self.assertEqual(sum(str(repeated.parent) in job['cwd'] for job in jobs), 4)
@@ -131,10 +131,10 @@ Path(result).write_text(json.dumps({'schema_version': 1, 'case': case, 'seed': i
         self.assertFalse(list(repeated.parent.rglob('run.log')))
         del self.data['compile']
         self.save_submit()
-        before = list((record.parent / 'rerun').iterdir())
+        before = list(record.parent.glob('rerun_*'))
         with self.assertRaisesRegex(ConfigError, 'requires a compile step'):
             replay(record)
-        self.assertEqual(list((record.parent / 'rerun').iterdir()), before)
+        self.assertEqual(list(record.parent.glob('rerun_*')), before)
 
     def test_removed_case_and_renamed_submit_are_not_silently_substituted(self):
         self.data['fake'] = {'outcomes': {'fast': 'fail'}}
@@ -148,7 +148,7 @@ Path(result).write_text(json.dumps({'schema_version': 1, 'case': case, 'seed': i
         self.save_submit()
         with self.assertRaisesRegex(ConfigError, 'submit names'):
             replay(record)
-        self.assertFalse((record.parent / 'rerun').exists())
+        self.assertFalse(list(record.parent.glob('rerun_*')))
 
     def test_seed_and_root_cli_overrides_are_rejected_including_aliases(self):
         for args in (['rerun', '/record', '--seed', '42'], ['rr', '/record', '-S42'],
@@ -165,15 +165,15 @@ Path(result).write_text(json.dumps({'schema_version': 1, 'case': case, 'seed': i
             return run(plan, roots, **settings)
         with patch('nsim.service.run', side_effect=changed), self.assertRaises(IntegrityError):
             replay(record)
-        self.assertFalse((record.parent / 'rerun').exists())
+        self.assertFalse(list(record.parent.glob('rerun_*')))
 
-    def test_symlink_rerun_parent_is_rejected_without_writing_elsewhere(self):
+    def test_named_symlink_rerun_directory_is_rejected_without_writing_elsewhere(self):
         self.data['fake'] = {'outcomes': {'fast': 'fail'}}
         self.save_submit()
         record, _ = self.launch()
-        (record.parent / 'rerun').symlink_to(self.backup, target_is_directory=True)
+        (record.parent / 'occupied').symlink_to(self.backup, target_is_directory=True)
         with self.assertRaisesRegex(ConfigError, 'symlink'):
-            replay(record)
+            replay(record, output_dir='occupied')
         self.assertEqual(list(self.backup.iterdir()), [])
 
     def test_single_external_simulation_rebuilds_inside_original_workspace(self):
@@ -184,7 +184,7 @@ Path(result).write_text(json.dumps({'schema_version': 1, 'case': case, 'seed': i
         record, _ = run(plan, [self.out])
         before = digest(record / 'run.json')
         repeated, _ = replay(record)
-        self.assertEqual(repeated.parent.parent, self.out / 'base' / 'rtl' / 'rerun')
+        self.assertEqual(repeated.parent.parent, self.out / 'base' / 'rtl')
         self.assertEqual(digest(record / 'run.json'), before)
 
     def test_no_failed_tasks_does_not_compile_or_create_rerun_directory(self):
@@ -193,7 +193,18 @@ Path(result).write_text(json.dumps({'schema_version': 1, 'case': case, 'seed': i
         self.assertIsNone(result)
         self.assertTrue(state['passed'])
         self.assertEqual(state['tasks'], [])
-        self.assertFalse((record.parent / 'rerun').exists())
+        self.assertFalse(list(record.parent.glob('rerun_*')))
+
+    def test_explicit_directory_name_is_never_reused(self):
+        self.data['fake'] = {'outcomes': {'fast': 'fail'}}
+        self.save_submit()
+        record, _ = self.launch()
+        first, _ = replay(record, output_dir='chosen_rerun')
+        self.assertEqual(first.parent.name, 'chosen_rerun')
+        before = digest(first / 'final.json')
+        with self.assertRaisesRegex(FileExistsError, 'already exists'):
+            replay(record, output_dir='chosen_rerun')
+        self.assertEqual(digest(first / 'final.json'), before)
 
     def test_recover_nested_rerun_uses_its_own_historical_plan(self):
         self.data['fake'] = {'outcomes': {'fast': 'fail'}}
@@ -205,4 +216,4 @@ Path(result).write_text(json.dumps({'schema_version': 1, 'case': case, 'seed': i
         Path(state['tasks'][0]['attempts'][0]['result']).write_text('broken')
         recovered, result = replay(repeated, recovery=True, roots=[self.backup])
         self.assertTrue(result['passed'])
-        self.assertEqual(recovered.parent.parent, self.backup / 'regr_dir')
+        self.assertEqual(recovered.parent.parent, self.backup / 'regr_dir' / record.parent.name)

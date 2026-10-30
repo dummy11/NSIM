@@ -31,7 +31,7 @@ def _issues(state):
     return issues
 
 
-def report(source, rebuild=False, as_json=False):
+def report(source, rebuild=False, as_json=False, output_dir=None, includes=()):
     """Return CLI output and exit code without executing or replaying work."""
     source = Path(source)
     original_issue = None
@@ -46,6 +46,21 @@ def report(source, rebuild=False, as_json=False):
 
     issues = ([original_issue] if original_issue else []) + (_issues(state) if state else [])
     case = plan is not None and plan.get('kind') == 'case'
+    if (output_dir is not None or includes) and not rebuild:
+        raise ConfigError('-dir and --include require --rebuild')
+    if rebuild and state is not None and not case and state.get('kind') != 'batch':
+        from nsim.rebuild_regression import rebuild as rebuild_summary
+        rebuilt_path, merged, summary_issues = rebuild_summary(source, plan, state, output_dir, includes)
+        complete = not summary_issues
+        if as_json:
+            output = json.dumps(dict(merged, report_complete=complete, issues=summary_issues,
+                                     rebuilt_report_path=str(rebuilt_path)), indent=2, ensure_ascii=False)
+        else:
+            output = (f'汇总结果：{"PASS" if merged["passed"] else "FAIL"}\n'
+                      f'汇总报告：{rebuilt_path}\n来源记录未修改。')
+        return output, 2 if not complete else 0 if merged['passed'] else 1
+    if (output_dir is not None or includes) and rebuild:
+        raise ConfigError('-dir and --include require an original regression')
     directory = _record_directory(source)
     report_path = directory / 'report.html'
     rebuilt_path = None

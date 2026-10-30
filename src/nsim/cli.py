@@ -90,10 +90,13 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
         add_argument(again, "--jobs", type=int)
         add_argument(again, "--retries", type=int)
         add_argument(again, "--retry-seconds", type=float)
+        add_argument(again, '-dir', '--dir', dest='output_dir', help='Name the new replay directory')
     report = add_command(commands, "report", help="Inspect saved results or rebuild an HTML report")
     add_argument(report, "source", type=Path, help="Completed case, regression or batch directory")
     add_argument(report, "--rebuild", action="store_true", help="Write a derived HTML view without changing execution records")
     add_argument(report, "--json", action="store_true")
+    add_argument(report, '-dir', '--dir', dest='output_dir', help='Name the new rebuilt report directory')
+    add_argument(report, '--include', action='append', type=Path, default=[], help='Select a rerun or recover directory')
     storage = add_command(commands, "storage", help="Probe an existing storage root")
     probes = storage.add_subparsers(dest="action", required=True)
     probe = add_command(probes, "check")
@@ -190,7 +193,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 0
         if args.command == "report":
             from nsim.report_command import report
-            output, code = report(args.source, rebuild=args.rebuild, as_json=args.json)
+            output, code = report(args.source, rebuild=args.rebuild, as_json=args.json,
+                                  output_dir=args.output_dir, includes=args.include)
             print(output)
             return code
         if args.command in ('com', 'sim', 'run', 'regr'):
@@ -205,7 +209,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         elif args.command in ("rerun", "recover"):
             journal, state = replay(args.source, roots=getattr(args, 'output_root', None) or args.global_output_root,
                                     recovery=args.command == "recover", seed=getattr(args, 'seed', None), jobs=args.jobs,
-                                    retries=args.retries, retry_seconds=args.retry_seconds)
+                                    retries=args.retries, retry_seconds=args.retry_seconds,
+                                    output_dir=args.output_dir)
         else:
             parser.print_help()
             return 0

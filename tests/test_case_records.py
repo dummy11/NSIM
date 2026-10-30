@@ -59,9 +59,19 @@ class CaseRecordTests(Fixture):
         value['analysis']['verdict'] = 'FAIL'
         write_json(record / 'run.json', value)
         self.assertEqual(load_final(record)[1]['tasks'][0]['effective_verdict'], 'INCOMPLETE')
-        _, recovered = replay(record, recovery=True)
+        new_record, recovered = replay(record, recovery=True)
         self.assertTrue(recovered['passed'])
-        self.assertTrue(load_final(record)[1]['passed'])
+        self.assertFalse(load_final(record)[1]['passed'])
+        self.assertTrue(load_final(new_record)[1]['passed'])
+
+    def test_named_recover_directory_collision_preserves_existing_result(self):
+        record, _ = run(self.one(), [self.out])
+        (record / 'run.log').write_text('damaged evidence')
+        first, _ = replay(record, recovery=True, output_dir='chosen_recover')
+        before = digest(first / 'final.json')
+        with self.assertRaisesRegex(FileExistsError, 'already exists'):
+            replay(record, recovery=True, output_dir='chosen_recover')
+        self.assertEqual(digest(first / 'final.json'), before)
 
     def test_control_damage_and_interruption_refuse_replay(self):
         record, _ = run(self.one(), [self.out])

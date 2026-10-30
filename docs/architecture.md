@@ -204,7 +204,7 @@ Output Store 在同一文件系统内用唯一临时文件与原子替换发布�
 
 失败重跑从最终快照选取未满足该批策略的 task，保存 source regression/task/attempt，默认使用原 seed、有效 submit、plusargs 和可验证的工程/编译身份。用户更换 seed 或输入时必须记录差异。编译产物损坏时只能从可验证输入重新构建并记录新身份。
 
-显式 rerun/recover 通过 parent 和 attempt 记录保存来源。rerun 从历史结果提取失败 case/seed，重新规划当前输入，在原回归下独立的 rerun/<ID>/ 中强制编译、仿真及检查，保留历史产物。recover 继续校验历史输入，单跑恢复会覆盖原目录。两者都要求来源有可信终态；未确认旧 job 已终止时不得重叠启动副本。
+显式 rerun/recover 通过 parent 和 attempt 记录保存来源。rerun 从历史结果提取完整执行但结果失败的 case/seed，重新规划当前输入，在原回归下独立的 rerun_<时间_UUID>/ 中强制编译、仿真及检查，保留历史产物。recover 继续校验历史输入，在独立 recover_<时间_UUID>/ 下重建未完成任务。两者都要求来源有可信终态；未确认旧 job 已终止时不得重叠启动副本。手动汇总见 [重跑、恢复与报告](replay_reports.md)。
 
 ## 存储与执行环境故障契约
 

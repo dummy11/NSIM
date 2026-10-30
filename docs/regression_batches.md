@@ -98,7 +98,7 @@ nightly_20261029T153000_8c4654ad324e4cc689f967769fc054e6
 空名称在批次中使用 `batch`、单次回归中使用 `regr`；原始清单路径仍完整保存在计划中。
 末尾保留完整的 32 位 UUID v4，同一清单在同一秒内启动也会生成不同 ID。
 目录、报告和关联记录使用各自完整的 ID；历史纯 UUID 回归和批次仍可读取。
-rerun 在来源回归的 `rerun/<新回归ID>/` 下独立执行；recover 在输出根的 regr_dir 下创建新回归。两者记录来源 ID，保留原回归记录。
+rerun、recover 在来源回归下分别新建 `rerun_<时间_UUID>/`、`recover_<时间_UUID>/`；跨输出根 recover 在新根的 `regr_dir/<原回归ID>/` 下创建。两者记录来源 ID，保留原回归记录。见 [重跑、恢复与报告](replay_reports.md)。
 目标回归目录已存在时拒绝采用，不隐式恢复。历史目录不参与本次统计。
 
 回归的 `-dir`、`-com-dir`、`-sim-dir` 在该回归自己的 submit 工作区内解析；拒绝逃出所属 submit
@@ -109,7 +109,7 @@ rerun 在来源回归的 `rerun/<新回归ID>/` 下独立执行；recover 在输
 此类回归的 recover 继续从原回归的已验证编译快照复制；rerun 使用当前输入重新编译，不复用快照。
 
 `record_dir` 返回 report 子目录。`report`、`rerun`、`recover` 均可接受回归根或 report 子目录；
-也可从 case 仿真目录通过 run.json 找到对应记录。回归失败重跑在来源回归下新建 rerun/<ID>/ 与 report，固定原始
+也可从 case 仿真目录通过 run.json 找到对应记录。回归失败重跑在来源回归下新建独立目录与 report，固定原始
 case、seed、submit 选择，读取当前配置并强制编译，不改写原回归及批次结论。批次重跑需先从批次报告选择具体回归。
 现有 recover 仍针对已发布终态的存储/证据失败，不支持自动接续被中断的批次或状态未知的 LSF 作业。
 同一次回归使用一个明确选定的输出根；case 执行错误只记录该 case 的实际问题，不触发自动切根。历史上使用多个输出根的记录仍可读取；recover 可为恢复回归选择其他根；rerun 固定在来源回归所在根。

@@ -92,7 +92,7 @@ class OutputLayoutTests(Fixture):
             replay(record, roots=[self.backup])
         new, state = replay(record, jobs=2)
         self.assertEqual({task['seed'] for task in state['tasks']}, {42, 43})
-        self.assertEqual(new.parent.parent, record.parent / 'rerun')
+        self.assertEqual(new.parent.parent, record.parent)
         task = state['tasks'][0]
         directory = Path(task['attempts'][0]['cwd'])
         self.assertEqual(directory, new.parent / 'base' / 'rtl' / 'sim_dir' / 'smoke_42')

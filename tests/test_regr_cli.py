@@ -145,9 +145,9 @@ class RegressionCliTests(Fixture):
             expected = Path(value) if Path(value).is_absolute() else self.out / 'base/rtl' / value
             self.assertEqual(record, expected / 'smoke_42')
             (record / 'run.log').write_text('changed evidence')
-            repeated, state = replay(record)
+            repeated, state = replay(record, recovery=True)
             self.assertTrue(state['passed'])
-            self.assertEqual(repeated.parent.parent, self.out / 'base/rtl/rerun')
+            self.assertEqual(repeated.parent.parent, self.out / 'base/rtl')
             self.assertEqual((record / 'run.log').read_text(), 'changed evidence')
         for value in ('.', '..', 'com_dir', str(self.project), str(self.out / 'regr_dir')):
             plan = create_plan(self.project, cases=['smoke'], submit_paths=[self.submit], seeds=[42], sim_dir=value)

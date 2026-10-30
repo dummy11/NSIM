@@ -168,6 +168,6 @@ submit 可增加 `compile` 对象：
 
 稳定启动器使用隔离的 Python 启动并清除继承的 Python 搜索路径配置。内置本地 worker 和 LSF worker 绑定控制器的代码路径，避免当前目录或其他项目的 `PYTHONPATH` 替换 nsim。用户配置的编译器、仿真器和 hook 仍使用 submit 声明的环境。
 
-`report`、`rerun`、`recover` 使用返回的 `record_dir`，不需要 event-root。`rerun` 固定失败 case/seed，重新读取当前工程登记、源码、submit、caselist/YAML 与输入文件，不要求它们匹配历史 hash。每次在来源回归的 `rerun/<新ID>/` 下建立独立 `report/`、编译和仿真目录；每个 submit 强制编译一次，再运行对应失败 case，包括原先由 sim 产生的任务。原产物与报告保留，详见 [失败重跑](rerun.md)。`recover` 仍校验历史输入、保留原执行阶段；sim 恢复要求原编译实例仍可验证，不隐式补编译。
+`report`、`rerun`、`recover` 使用返回的 `record_dir`，不需要 event-root。`rerun` 固定完整执行但结果失败的 case/seed，重新读取当前工程登记、源码、submit、caselist/YAML 与输入文件，不要求它们匹配历史 hash。每次在来源回归下建立独立 `rerun_<时间_UUID>/report/`、编译和仿真目录；每个 submit 强制编译一次，再运行对应失败 case，包括原先由 sim 产生的任务。原产物与报告保留，详见 [重跑、恢复与报告](replay_reports.md)。`recover` 仍校验历史输入、保留原执行阶段；sim 恢复要求原编译实例仍可验证，不隐式补编译。
 
 `--dry-run` 只写独立预览记录，不写编译成功记录，不清理编译或仿真产物。com 预览仅含编译；sim 预览仅含仿真；run/regr 包含两阶段。预览成功不代表所引用编译产物存在或真实 EDA/farm 作业可运行。

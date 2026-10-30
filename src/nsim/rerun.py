@@ -1,29 +1,17 @@
 """Plan fixed case/seed failures against current inputs in a private rebuild."""
 
-from pathlib import Path
-
-from nsim.checks import ACCEPTED
 from nsim.config import ConfigError
-from nsim.identifiers import new_regression_id
-from nsim.layout import isolated_regression, is_regression, workspace_directory
+from nsim.replay_paths import anchor, directory_name
 from nsim.planning import create_plan
 
 
-def prepare_rerun(source, original, state):
+def prepare_rerun(source, original, state, output_dir=None):
     if original['execution']['phase'] == 'com':
         raise ConfigError('rerun requires completed case results; use com to retry compilation')
-    selected = [task for task in state['tasks'] if task['effective_verdict'] not in ACCEPTED]
+    selected = [task for task in state['tasks'] if task['effective_verdict'] in ('FAIL', 'NO_COMPARE')]
     if not selected:
         return None
-    root_candidates = [Path(path).resolve() for path in original['policy']['output_roots']]
-    journal = Path(original['policy']['record_dir'])
-    roots = [root for root in root_candidates if root in journal.parents]
-    if not roots and len(root_candidates) == 1 and not (is_regression(original) or isolated_regression(original)):
-        # A standalone run may have an absolute -sim-dir outside its output root.
-        roots = root_candidates
-    if len(roots) != 1:
-        raise ConfigError('cannot locate the original record inside one recorded output root')
-    root = roots[0]
+    root, anchor_path = anchor(original)
     previous = {task['id']: task for task in original['tasks']}
     tasks = [previous[task['id']] for task in selected]
     submit_indices = list(dict.fromkeys(task['submit'] for task in tasks))
@@ -42,18 +30,14 @@ def prepare_rerun(source, original, state):
             raise ConfigError(f'rerun requires a compile step for submit {submit["name"]}; prebuilt-only inputs cannot be rebuilt')
     # A case reference inside a regression still belongs to that regression.
     # A standalone case uses its workspace, outside the owned case directory.
-    anchor = original['execution'].get('rerun_parent')
-    if anchor is None:
-        if is_regression(original) or isolated_regression(original):
-            parent = journal.parent if original['execution'].get('layout') else journal
-        else:
-            parent = workspace_directory(root, original, tasks[0])
-        anchor = str(parent.relative_to(root))
-    plan['id'] = new_regression_id(caselists)
+    name = directory_name(output_dir, 'rerun')
+    plan['id'] = name if output_dir is None else plan['id']
     plan['kind'] = 'regression'
-    plan['execution'].update(phase='regr', layout='isolated-regression-v1', rerun_parent=anchor)
+    plan['execution'].update(phase='regr', layout='isolated-regression-v1',
+                             replay_parent=anchor_path, replay_dir=name)
     plan['seed_selection'].update(source='rerun', repeat=None)
-    plan['source'] = {'journal': str(source), 'id': original['id'], 'mode': 'rerun'}
+    plan['source'] = {'journal': str(source), 'id': original['id'], 'mode': 'rerun',
+                      'root_id': (original.get('source') or {}).get('root_id', original['id'])}
     batch = original.get('batch', original.get('source_batch'))
     if batch:
         plan['source_batch'] = batch

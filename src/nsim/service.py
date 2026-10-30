@@ -30,6 +30,10 @@ class JournalWriteError(OSError):
     """The controller cannot durably account for the regression's progress."""
 
 
+class ExecutionDirectoryExists(FileExistsError):
+    """The selected new execution directory was claimed by another invocation."""
+
+
 def validate_roots(plan, roots):
     roots = list(dict.fromkeys(Path(p).resolve() for p in roots))
     if not roots:
@@ -87,7 +91,10 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
         # Claim the execution namespace before creating any compile/simulation
         # directories. Never silently adopt an old or another controller's run.
         make_directory(execution_root.parent, record_root)
-        execution_root.mkdir(exist_ok=False)
+        try:
+            execution_root.mkdir(exist_ok=False)
+        except FileExistsError as exc:
+            raise ExecutionDirectoryExists(f'execution directory already exists: {execution_root}') from exc
         journal = execution_root / 'report'
         journal.mkdir()
     cancel = threading.Event()
@@ -361,7 +368,7 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
                 dashboard.close()
 
 
-def replay(source, roots=None, recovery=False, seed=None, **overrides):
+def replay(source, roots=None, recovery=False, seed=None, output_dir=None, **overrides):
     source = Path(source).resolve()
     original, state = load_final(source)
     if original.get('kind') == 'batch':
@@ -370,7 +377,7 @@ def replay(source, roots=None, recovery=False, seed=None, **overrides):
         from nsim.rerun import prepare_rerun
         if seed is not None or roots is not None:
             raise ConfigError('rerun preserves case/seed and the original output root; overrides are not supported')
-        prepared = prepare_rerun(source, original, state)
+        prepared = prepare_rerun(source, original, state, output_dir=output_dir)
         if prepared is None:
             return None, {'passed': state['passed'], 'message': 'no matching failed tasks', 'tasks': []}
         plan, roots = prepared
@@ -378,21 +385,21 @@ def replay(source, roots=None, recovery=False, seed=None, **overrides):
         settings = {key: policy[key] for key in ('jobs', 'min_free_bytes', 'min_free_inodes')}
         settings.update(retries=0, retry_seconds=0)
         settings.update({key: value for key, value in overrides.items() if value is not None})
-        return run(plan, roots, **settings)
+        return _run_replay(plan, roots, settings, output_dir)
     check_identity(original)
-    selected = state["tasks"] if state["report_errors"] else [
-        task for task in state["tasks"] if task["effective_verdict"] not in ACCEPTED]
-    if recovery and not state["report_errors"]:
-        selected = [t for t in selected if t["effective_verdict"] in {"INFRA_ERROR", "INCOMPLETE"}]
+    selected = [task for task in state['tasks'] if task['effective_verdict'] not in
+                ACCEPTED | {'FAIL', 'NO_COMPARE', 'INPUT_CHANGED'}]
     if not selected:
         return None, {"passed": state["passed"], "message": "no matching failed tasks", "tasks": []}
+    from nsim.replay_paths import anchor, directory_name
+    _, anchor_path = anchor(original)
+    name = directory_name(output_dir, 'recover')
     plan = copy.deepcopy(original)
     plan['execution'].pop('rerun_parent', None)
-    regression = is_regression(original) or isolated_regression(original)
-    plan["id"] = new_regression_id(plan.get('caselists', [])) if regression else uuid.uuid4().hex
-    if regression and original['execution']['phase'] != 'com':
-        plan['kind'] = 'regression'
-        plan['execution']['layout'] = 'isolated-regression-v1'
+    plan['id'] = name if output_dir is None else new_regression_id(plan.get('caselists', []))
+    plan['kind'] = 'regression'
+    plan['execution'].update(layout='isolated-regression-v1', replay_parent=anchor_path, replay_dir=name)
+    if original['execution']['phase'] != 'com':
         if original['execution']['phase'] == 'sim':
             plan['execution']['reuse_builds'] = {
                 str(task['submit']): original['build_refs'][task['id']]
@@ -403,17 +410,19 @@ def replay(source, roots=None, recovery=False, seed=None, **overrides):
         for field in ('com_dir', 'sim_dir'):
             value = Path(plan['execution'].get(field, field))
             if value.is_absolute():
-                workspace = workspace_directory(Path(original['policy']['output_roots'][0]),
-                                                original, original['tasks'][0])
-                plan['execution'][field] = os.path.relpath(value, workspace)
+                # The historical absolute product is evidence, not the target
+                # for a new isolated replay.
+                plan['execution'][field] = field
     if 'batch' in plan:
         plan['source_batch'] = plan.pop('batch')
-    plan["source"] = {"journal": str(source), "id": original["id"], "mode": "recover" if recovery else "rerun"}
+    plan['source'] = {'journal': str(source), 'id': original['id'], 'mode': 'recover',
+                      'root_id': (original.get('source') or {}).get('root_id', original['id'])}
     plan["tasks"] = []
     destinations = {}
     for task in selected:
         copy_task = next(copy.deepcopy(t) for t in original["tasks"] if t["id"] == task["id"])
-        copy_task["parent"] = {"run": original["id"], "task": task["id"], "attempt": task["attempts"][-1]["id"]}
+        copy_task['parent'] = {'run': original['id'], 'task': task['id'],
+                               'attempt': task['attempts'][-1]['id'] if task['attempts'] else None}
         if seed is not None:
             integer(seed, "seed", 1, 2147483647)
             copy_task["seed"] = seed
@@ -432,4 +441,21 @@ def replay(source, roots=None, recovery=False, seed=None, **overrides):
     # explicit new run and must use the current no-failover contract.
     settings.update(retries=0, retry_seconds=0)
     settings.update({k: v for k, v in overrides.items() if v is not None})
-    return run(plan, roots or policy["output_roots"], **settings)
+    return _run_replay(plan, roots or policy['output_roots'], settings, output_dir)
+
+
+def _run_replay(plan, roots, settings, output_dir):
+    """Retry only an automatically chosen name that collided at atomic mkdir."""
+    from nsim.identifiers import new_replay_name
+    from nsim.layout import regression_directory
+    for _ in range(10):
+        try:
+            return run(plan, roots, **settings)
+        except ExecutionDirectoryExists:
+            if output_dir is not None or not regression_directory(Path(roots[0]).resolve(), plan).exists():
+                raise
+            mode = plan['source']['mode']
+            name = new_replay_name(mode)
+            plan['id'] = name
+            plan['execution']['replay_dir'] = name
+    raise ConfigError('cannot allocate a unique replay directory')

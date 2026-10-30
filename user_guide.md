@@ -456,7 +456,7 @@ sim_dir 直接按 case 名与 seed 分组；同一组合覆盖旧产物，不创
 
 真正的单跑（一个 case × submit × seed）直接把计划、终态及完成校验保存在仿真目录，不生成实时 HTML 或回归汇总；单个 com 的阶段记录在编译目录。使用 caselist 或多个 submit/seed 时，该次回归的记录和产物均隔离在 regr_dir/<id>/，汇总文件位于 report/。
 
-`report`、`rerun`、`recover` 接受命令返回的 record_dir，也接受回归中某个 sim_dir 的运行目录；后者通过校验过的 run.json 选择单个任务。rerun 固定 case/seed，使用当前输入强制重新编译，结果存入原回归下独立的 rerun/<ID>/，保留原产物和报告。单跑来源则在原工作区的 rerun/<ID>/ 下保存独立结果。
+`report`、`rerun`、`recover` 接受命令返回的 record_dir，也接受回归中某个 sim_dir 的运行目录；后者通过校验过的 run.json 选择单个任务。rerun 固定 case/seed，使用当前输入强制重新编译，结果存入原回归下独立的 rerun_<时间_UUID>/，保留原产物和报告。单跑来源则在原工作区的同名规则目录下保存独立结果。
 
 独立 --event-root 参数和 NSIM_EVENT_ROOT 已取消；旧 event-root 目录不迁移、不删除。report/recover 由启动器选择历史版本；rerun 选择来源工程当前版本 pin，读取当前输入并重新建立计划。
 
@@ -509,11 +509,11 @@ nsim storage check /tmp/nsim-output --min-free-bytes 104857600
 
 `report` 无二级 `show` 命令。传入单个 case 的仿真目录时，它在终端打印已保存的结果摘要；传入回归或批次目录时，先校验完成记录、HTML 和结果证据。完整报告会显示 PASS/FAIL 及 `report.html` 的绝对路径和浏览器 `file://` 地址；回归 FAIL 仍可有完整报告。报告或证据不完整时默认只显示简短原因。`--json` 输出机器可读的状态、`report_complete` 和问题列表。
 
-`--rebuild` 从仍可校验的计划与状态生成 `report.rebuilt.html`，不修改原 `final.json`、`report.html` 或任务记录；该新页面不属于原完成校验。如果日志证据发生变化，新页面会将原通过结果标为 INCOMPLETE。计划、状态或完成记录损坏时不能重建。`report` 从不提交、恢复或重启任务；需要重新执行时使用 `rerun` 或 `recover`。`report` 的退出码：完整且通过为 0，完整但任务失败为 1，报告或证据不完整为 2。
+原回归的 `--rebuild` 汇总原结果与最新一次 rerun、recover，生成新的 `report_<时间_UUID>/`，不修改原 `final.json`、`report.html` 或任务记录；该新报告不属于原完成校验。`-dir NAME` 可指定新目录名，`--include PATH` 可指定来源不在原目录下或自动判定有歧义的 rerun/recover。计划、状态或完成记录损坏时不能重建。批次目录仍按旧规则生成 `report.rebuilt.html`。`report` 从不提交、恢复或重启任务；需要重新执行时使用 `rerun` 或 `recover`。`report` 的退出码：完整且通过为 0，完整但任务失败为 1，报告或证据不完整为 2。
 
-`rerun` 固定来源记录中最终未通过任务的 case、seed 和 submit 选择，重新读取当前工程登记、源码、submit、caselist/YAML 与输入文件。每个 submit 强制编译一次，再完整执行对应失败 case，包含原先以 sim 启动的任务；没有 compile 步骤的 command submit 会报错。每次生成独立的 rerun/<ID>/、report/ 与 parent 引用，不覆盖历史结果。禁止 -seed/--seed/-S 和 -o/--output-root 覆盖，可用 --jobs 调整并发。详细目录、边界及例子见 [失败重跑](docs/rerun.md)。
+`rerun` 固定来源记录中完整执行但结果失败任务的 case、seed 和 submit 选择，重新读取当前工程登记、源码、submit、caselist/YAML 与输入文件。每个 submit 强制编译一次，再完整执行对应失败 case，包含原先以 sim 启动的任务；没有 compile 步骤的 command submit 会报错。每次生成独立的 rerun_<时间_UUID>/、report/ 与 parent 引用，不覆盖历史结果。禁止 -seed/--seed/-S 和 -o/--output-root 覆盖，可用 --jobs 调整并发，以 -dir 指定新目录名。详细目录、边界及例子见 [重跑、恢复与报告](docs/replay_reports.md)。
 
-`recover` 仍使用历史输入、版本和执行阶段，仅选择存储/证据不完整任务；报告发布失败时重新执行相关任务。单跑恢复会覆盖原目录，回归恢复独立输出；保留原有输出根与 seed 覆盖入口。
+`recover` 仍使用历史输入、版本和执行阶段，仅选择没有形成完整有效结果的任务；在独立目录生成本次报告。保留原有输出根与 seed 覆盖入口；使用新 seed 的结果不替代原 seed 的汇总结论。
 
 rerun 为当前输入建立新的 hash 和配置快照，不要求与历史输入相同；本次执行前后仍检查输入一致性。recover 要求历史输入和运行时可验证。两者都拒绝损坏的控制记录和未确认终态的来源，不自动重叠派发状态未知的旧任务。
 

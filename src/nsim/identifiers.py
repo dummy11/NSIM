@@ -15,3 +15,10 @@ def readable_id(label, fallback):
 def new_regression_id(caselists):
     """Name a regression after its ordered caselists, including saved replays."""
     return readable_id('-'.join(Path(path).stem for path in caselists), 'regr')
+
+
+def new_replay_name(mode):
+    """Readable unique directory name for one rerun, recover, or report."""
+    if mode not in ('rerun', 'recover', 'report'):
+        raise ValueError('invalid replay mode')
+    return readable_id(mode, mode)

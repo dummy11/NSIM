@@ -9,8 +9,8 @@ from test_regression import Fixture
 from nsim.layout import simulation_directory
 from nsim.planning import create_plan
 from nsim.reports import load_final
-from nsim.service import run
-from nsim.storage import IntegrityError, digest
+from nsim.service import replay, run
+from nsim.storage import IntegrityError, digest, write_json
 
 
 class ReportCommandTests(Fixture):
@@ -65,9 +65,11 @@ class ReportCommandTests(Fixture):
         self.assertIn('报告不完整', missing.stdout)
         self.assertNotIn('浏览器打开', missing.stdout)
         rebuilt = self.command(record, '--rebuild')
-        self.assertEqual(rebuilt.returncode, 2, rebuilt.stderr)
-        self.assertIn('已重建展示报告', rebuilt.stdout)
-        self.assertIn('smoke', (record / 'report.rebuilt.html').read_text())
+        self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
+        self.assertIn('汇总报告', rebuilt.stdout)
+        rebuilt_dirs = list(record.parent.glob('report_*'))
+        self.assertEqual(len(rebuilt_dirs), 1)
+        self.assertIn('smoke', (rebuilt_dirs[0] / 'report.html').read_text())
         self.assertFalse(html.exists())
         self.assertEqual(final_hash, digest(record / 'final.json'))
         with self.assertRaises(IntegrityError):
@@ -84,7 +86,7 @@ class ReportCommandTests(Fixture):
         self.assertIn('报告不完整', result.stdout)
         rebuilt = self.command(record, '--rebuild')
         self.assertEqual(rebuilt.returncode, 2, rebuilt.stderr)
-        self.assertIn('INCOMPLETE', (record / 'report.rebuilt.html').read_text())
+        self.assertIn('INCOMPLETE', next(record.parent.glob('report_*/report.html')).read_text())
 
     def test_damaged_control_record_cannot_be_rebuilt(self):
         record = self.regression()
@@ -92,4 +94,74 @@ class ReportCommandTests(Fixture):
         result = self.command(record, '--rebuild')
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn('报告不完整', result.stdout)
-        self.assertFalse((record / 'report.rebuilt.html').exists())
+        self.assertFalse(list(record.parent.glob('report_*')))
+
+    def test_rebuild_uses_latest_rerun_and_rejects_named_directory_collision(self):
+        record = self.regression(failing=True)
+        original_hash = digest(record / 'final.json')
+        first, _ = replay(record)
+        second, _ = replay(record)
+        self.assertNotEqual(first, second)
+        self.assertEqual(first.parent.parent, record.parent)
+        result = self.command(record, '--rebuild', '-dir', 'review', '--json')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        summary = json.loads((record.parent / 'review' / 'summary.json').read_text())
+        self.assertEqual(summary['sources']['rerun'], str(second.parent))
+        self.assertEqual(summary['sources']['original'], str(record.parent))
+        self.assertEqual(digest(record / 'final.json'), original_hash)
+        collision = self.command(record, '--rebuild', '-dir', 'review')
+        self.assertEqual(collision.returncode, 2)
+        self.assertIn('File exists', collision.stderr)
+
+    def test_include_overrides_latest_selection_and_requires_matching_origin(self):
+        record = self.regression(failing=True)
+        first, _ = replay(record)
+        second, _ = replay(record)
+        self.assertNotEqual(first, second)
+        result = self.command(record, '--rebuild', '--include', first.parent, '--json')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        path = Path(json.loads(result.stdout)['rebuilt_report_path'])
+        summary = json.loads((path.parent / 'summary.json').read_text())
+        self.assertEqual(summary['sources']['rerun'], str(first.parent))
+        other = self.regression(failing=True)
+        other_replay, _ = replay(other)
+        wrong = self.command(record, '--rebuild', '--include', other_replay.parent)
+        self.assertEqual(wrong.returncode, 2)
+
+    def test_ambiguous_latest_requires_include_before_creating_report(self):
+        record = self.regression(failing=True)
+        first, _ = replay(record)
+        second, _ = replay(record)
+        first_state = json.loads((first / 'state.json').read_text())
+        second_state = json.loads((second / 'state.json').read_text())
+        second_state['ended_at'] = first_state['ended_at']
+        write_json(second / 'state.json', second_state)
+        final = json.loads((second / 'final.json').read_text())
+        final['files']['state.json'] = digest(second / 'state.json')
+        write_json(second / 'final.json', final)
+        ambiguous = self.command(record, '--rebuild', '-dir', 'chosen_report')
+        self.assertEqual(ambiguous.returncode, 2)
+        self.assertIn('latest rerun', ambiguous.stderr)
+        self.assertFalse((record.parent / 'chosen_report').exists())
+        selected = self.command(record, '--rebuild', '-dir', 'chosen_report', '--include', first.parent)
+        self.assertEqual(selected.returncode, 1, selected.stderr)
+        self.assertTrue((record.parent / 'chosen_report' / 'summary.json').is_file())
+
+    def test_summary_uses_latest_rerun_and_recover_for_their_own_cases(self):
+        record = self.regression(failing=True)
+        original = json.loads((record / 'state.json').read_text())
+        fast = next(task for task in original['tasks'] if task['case'] == 'fast')
+        Path(fast['attempts'][-1]['result']).write_text('damaged evidence')
+        recovered, recovery_state = replay(record, recovery=True)
+        self.assertEqual([task['case'] for task in recovery_state['tasks']], ['fast'])
+        self.data['fake'] = {}
+        self.save_submit()
+        rerun, rerun_state = replay(record)
+        self.assertEqual([task['case'] for task in rerun_state['tasks']], ['smoke'])
+        rebuilt = self.command(record, '--rebuild', '--json')
+        self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
+        summary = json.loads(rebuilt.stdout)
+        self.assertTrue(summary['passed'])
+        manifest = json.loads((Path(summary['rebuilt_report_path']).parent / 'summary.json').read_text())
+        self.assertEqual(manifest['sources']['rerun'], str(rerun.parent))
+        self.assertEqual(manifest['sources']['recover'], str(recovered.parent))

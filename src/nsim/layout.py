@@ -52,6 +52,15 @@ def isolated_regression(plan):
 
 
 def regression_directory(root, plan):
+    replay_parent = plan.get('execution', {}).get('replay_parent')
+    if replay_parent is not None:
+        parent = Path(replay_parent)
+        name = plan['execution']['replay_dir']
+        if (parent.is_absolute() or not parent.parts or '..' in parent.parts or
+                not isinstance(name, str) or not name or name in ('.', '..') or
+                '/' in name or '\\' in name or '\0' in name):
+            raise ConfigError('replay directory must be a simple name below the original regression')
+        return Path(root) / parent / name
     parent = plan.get('execution', {}).get('rerun_parent')
     if parent is not None:
         parent = Path(parent)

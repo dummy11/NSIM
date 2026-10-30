@@ -110,8 +110,10 @@ def prepare(submit, project, inputs, allow_missing):
     if submit['adapter'] == 'vcs':
         config = submit['vcs']
         if project.schema_version == 2:
-            if 'filelist' in config and (project.root / config['filelist']).resolve() != project.root / 'filelist' / 'sim.f':
-                raise ConfigError('schema 2 uses registered filelists; omit vcs.filelist or set filelist/sim.f')
+            from nsim.project_layout import directory
+            managed_map = directory(project, 'filelist') / 'sim.f'
+            if 'filelist' in config and (project.root / config['filelist']).resolve() != managed_map:
+                raise ConfigError(f'schema 2 uses registered filelists; omit vcs.filelist or set {managed_map}')
             tokens = []
             config['input_directories'] = {}
             for path, root in ((project.rtl_filelist, project.rtl_root), (project.verification_filelist, project.root)):
@@ -120,7 +122,7 @@ def prepare(submit, project, inputs, allow_missing):
                     raise ConfigError(f'filelist is empty; add sources before planning: {path}')
                 tokens.extend(resolved)
                 inputs.update(dependencies)
-            config['filelist'] = str(project.root / 'filelist' / 'sim.f')
+            config['filelist'] = str(managed_map)
             config['filelist_tokens'] = tokens
         else:
             if 'filelist' not in config:

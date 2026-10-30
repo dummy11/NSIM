@@ -2,7 +2,18 @@
 
 项目 TOML 是文件的“地址簿”：命令只写简称，配置决定文件在哪里。
 `-sub`、`-l`、`-rl` 和 `submit show/check` 共用解析规则；`submit new` 的创建位置与默认父模板也从 TOML 读取。
-目录可以任意命名，不要求叫 submit、caselist 或 regression。bootstrap 只把这些名称作为初始配置写入。
+目录可以任意命名。bootstrap 默认创建 `filelist/`、`caselist/`、`regression/`、`submit/`、`resources/`、`scripts/`，并把所选位置写入项目 TOML。`resources/` 和 `scripts/` 初始为空；工具配置、示例和文件清单写到相应目录。目录名只是初始化选择，运行时依配置解析。
+
+新建工程时可分别指定目录，以下值都相对新工程的 verification 根：
+
+```sh
+nsim bootstrap --rtl-root /work/chip/rtl --rtl-filelist /work/chip/rtl/rtl.f \
+  --filelist-dir sources/lists --caselist-dir tests/suites \
+  --regression-dir plans/batches --submit-dir flows/vcs \
+  --resources-dir data/assets --scripts-dir tools/hooks
+```
+
+这些目录必须位于工程内，不能通过 `..` 逃出工程；自定义的短名称查找、公共模板、教学数据和工具维护的 `sim.f` 都按选择后的路径生成。已注册工程重复 bootstrap 不移动目录；之后可以直接编辑 TOML 的 catalog 根目录映射调整查找位置。搬动已有的 `filelist/` 等生成文件则需要同时调整项目配置及引用。
 
 ## 最直接的方式：一个名字对应一个文件
 

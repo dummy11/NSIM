@@ -141,7 +141,7 @@ case_defaults 内的字段 null 用于清除对应运行参数，其余字段按
     "pre_compile": {
       "name": "prepare",
       "argv": [
-        "../scripts/prepare",
+        "../../scripts/prepare",
         "{project}",
         "{build_dir}"
       ],
@@ -151,7 +151,7 @@ case_defaults 内的字段 null 用于清除对应运行参数，其余字段按
       {
         "name": "inspect_build",
         "argv": [
-          "../scripts/inspect_build",
+          "../../scripts/inspect_build",
           "{exit_code}",
           "{timed_out}"
         ],
@@ -162,7 +162,7 @@ case_defaults 内的字段 null 用于清除对应运行参数，其余字段按
       {
         "name": "prepare_case",
         "argv": [
-          "../scripts/prepare_case",
+          "../../scripts/prepare_case",
           "{case}",
           "{seed}",
           "{wave_dir}"
@@ -174,7 +174,7 @@ case_defaults 内的字段 null 用于清除对应运行参数，其余字段按
       {
         "name": "check_result",
         "argv": [
-          "../scripts/check_result",
+          "../../scripts/check_result",
           "--result",
           "{result}"
         ],
@@ -183,7 +183,7 @@ case_defaults 内的字段 null 用于清除对应运行参数，其余字段按
       {
         "name": "log_analysis",
         "argv": [
-          "../scripts/analyze",
+          "../../scripts/analyze",
           "{log_dir}",
           "{analysis}"
         ],
@@ -225,7 +225,7 @@ case_defaults 内的字段 null 用于清除对应运行参数，其余字段按
       "+NSIM_FSDB={wave}"
     ],
     "result_argv": [
-      "../scripts/check_result",
+      "../../scripts/check_result",
       "--log",
       "{log}",
       "--result",
@@ -463,7 +463,7 @@ FPGA/硬件平台没有通用编译命令，示例脚本必须由工程实现。
   ],
   "compile": {
     "argv": [
-      "../scripts/build",
+      "../../scripts/build",
       "{project}",
       "{build_dir}"
     ],

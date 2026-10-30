@@ -254,7 +254,7 @@ nsim bootstrap --verification-root /work/chip/conv_verif \
   --nsim-version 0.1.0
 ```
 
-示例路径需替换为真实路径。新项目的 `--rtl-root`、`--rtl-filelist` 必填；`--name` 默认 `verification`，在当前目录下创建同名目录。提供 `--verification-root` 时，项目名取规范化后的目录名；同时提供的 `--name` 必须一致。所有命令行相对路径均相对于调用命令的当前目录，不相对于另一个参数。
+示例路径需替换为真实路径。新项目的 `--rtl-root`、`--rtl-filelist` 必填；`--name` 默认 `verification`，在当前目录下创建同名目录。提供 `--verification-root` 时，项目名取规范化后的目录名；同时提供的 `--name` 必须一致。一般文件参数的相对路径相对调用目录；`--filelist-dir`、`--caselist-dir`、`--regression-dir`、`--submit-dir`、`--resources-dir`、`--scripts-dir` 专门相对验证工程根。自定义示例见 [名称与文件映射](docs/catalog.md)。
 
 ```text
 conv_verif/
@@ -284,12 +284,15 @@ conv_verif/
 │   ├── 07_overrides.caselist
 │   ├── case.yaml
 │   └── README.md
-└── filelist/
-    ├── tb.f
-    └── sim.f
+├── filelist/
+│   ├── tb.f
+│   └── sim.f
+├── regression/
+├── resources/
+└── scripts/
 ```
 
-未提供 verification filelist 时，创建带注释的 `filelist/tb.f` 模板。默认按 mode 生成公共 submit；`submit_demo.json` 通过 `extends: "common/rtl.json"` 继承 RTL 模板。每个父模板声明自己的 mode，命令行 `-mode` 只校验匹配，不动态更换父模板。rtl/gate 使用 VCS 预览模板；其他模式使用待填写真实 argv 的 command 模板。Demo 配套 `submit_demo.md` 覆盖完整语法、其他适配器、hooks 与覆盖规则，仓库副本见 [Submit 语法](docs/submit.md)。已有的 `tb.f` 和 submit 文件保持原内容；已注册项目重复 bootstrap 不回填模板。指定外部 verification filelist 时，保留并直接登记该文件。空 TB 清单显示待填写，VCS 规划会拒绝空清单。
+未提供 verification filelist 时，在选定 filelist 目录创建带注释的 `tb.f` 模板。默认按 mode 生成公共 submit；`submit_demo.json` 通过 `extends: "common/rtl.json"` 继承 RTL 模板。每个父模板声明自己的 mode，命令行 `-mode` 只校验匹配，不动态更换父模板。rtl/gate 使用 VCS 预览模板；其他模式使用待填写真实 argv 的 command 模板。Demo 配套 `submit_demo.md` 覆盖完整语法、其他适配器、hooks 与覆盖规则，仓库副本见 [Submit 语法](docs/submit.md)。已有的 `tb.f` 和 submit 文件保持原内容；已注册项目重复 bootstrap 不回填模板。指定外部 verification filelist 时，保留并直接登记该文件。空 TB 清单显示待填写，VCS 规划会拒绝空清单。
 
 新项目还生成 `caselist/` 的 8 个 demo、可选 `case.yaml` 和语法说明，已有同名文件保持原内容。
 `case` 始终为逻辑用例名；`uvm_test`、`seq`、`c_test` 通过内置或自定义映射生成仿真参数，
@@ -298,7 +301,7 @@ conv_verif/
 三个入口字段可以缺省或用 null 清除；工程负责实际启动方式。
 完整示例、兼容规则和运行限制见 [Caselist 语法](docs/caselist.md)。
 
-`filelist/sim.f` 是带所有权标记的 nsim 组合来源说明，不是直接传给 VCS 的原生 `-f` 文件。每次规划分别按 RTL 和 verification 根解析登记的列表，保留嵌套 `-f/-F` 语义，实际编译 token 和 argv 固化到本次 `plan.json`、`commands.json`。不要手工编辑工具维护的 `sim.f`；同名用户文件不会被覆盖。schema 2 的 VCS submit 省略 `vcs.filelist`，也可显式填 `filelist/sim.f`；其他覆盖路径被拒绝，以免绕过登记的两套输入。
+选定 filelist 目录中的 `sim.f` 是带所有权标记的 nsim 组合来源说明，不是直接传给 VCS 的原生 `-f` 文件。每次规划分别按 RTL 和 verification 根解析登记的列表，保留嵌套 `-f/-F` 语义，实际编译 token 和 argv 固化到本次 `plan.json`、`commands.json`。不要手工编辑工具维护的 `sim.f`；同名用户文件不会被覆盖。schema 2 的 VCS submit 省略 `vcs.filelist`，也可显式填写选定 filelist 目录下的 `sim.f`；其他覆盖路径被拒绝，以免绕过登记的两套输入。
 
 ## 已有 .nsim、注册冲突与项目发现
 

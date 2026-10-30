@@ -1,6 +1,7 @@
 """Bootstrap examples and their complete, colocated submit language guide."""
 
 from copy import deepcopy
+import posixpath
 import json
 
 from nsim.config import MODES
@@ -32,10 +33,10 @@ DEMO = {
 }
 
 
-def file_demo():
+def file_demo(submit_dir='submit'):
     """Concrete companion inputs make the default example fully previewable."""
     value = dict(deepcopy(DEMO), **common_submit('rtl'))
-    base = 'submit/demo_inputs/'
+    base = submit_dir + '/demo_inputs/'
     value['files'] = {
         'coverage_hier': {'path': base + 'vcs/coverage.hier', 'phases': ['compile']},
         'xprop_config': {'path': base + 'vcs/xprop.cfg', 'phases': ['compile']},
@@ -61,8 +62,8 @@ def file_demo():
     return value
 
 
-def full_vcs_demo():
-    value = file_demo()
+def full_vcs_demo(submit_dir='submit', filelist='filelist/sim.f', script_dir='scripts'):
+    value = file_demo(submit_dir)
     value['env'] = {'NSIM_SUBMIT_LABEL': 'demo'}
     value['scheduler'].update(
         kind='lsf', queue='YOUR_QUEUE', resources=['rusage[mem=4096]'], licenses={'YOUR_LICENSE': 1},
@@ -70,7 +71,7 @@ def full_vcs_demo():
         poll_seconds=1, deadline_seconds=3600, cancel_seconds=30,
         command_timeout_seconds=30, unknown_seconds=30, result_wait_seconds=5)
     value['vcs'].update(
-        filelist='filelist/sim.f', top='YOUR_TB_TOP',
+        filelist=filelist, top='YOUR_TB_TOP',
         dpi={'makefile': 'model/Makefile', 'make': 'make', 'cc': 'cc', 'cxx': 'c++',
              'scope': 'project', 'target': 'all', 'args': ['MODEL=example'], 'timeout_seconds': 300},
         result_argv=['../scripts/check_result', '--log', '{log}', '--result', '{result}', '--config', '{file:checker_config}'])
@@ -86,13 +87,23 @@ def full_vcs_demo():
             {'name': 'log_analysis', 'argv': ['../scripts/analyze', '{log_dir}', '{analysis}'], 'timeout_seconds': 60},
         ],
     }
-    return value
+    # Script executables are anchored to the JSON file under submit/examples/.
+    script_prefix = posixpath.relpath(script_dir, submit_dir + '/examples') + '/'
+    def scripts(item):
+        if isinstance(item, str) and item.startswith('../scripts/'):
+            return script_prefix + item[len('../scripts/'):]
+        if isinstance(item, list):
+            return [scripts(part) for part in item]
+        if isinstance(item, dict):
+            return {key: scripts(part) for key, part in item.items()}
+        return item
+    return scripts(value)
 
 
 COMMAND_DEMO = {
     'schema_version': 1, 'name': 'command_demo', 'extends': 'common/fpga.json',
     'argv': ['{build_dir}/simulator', '--case', '{case}', '--seed', '{seed}', '--result', '{result}'],
-    'compile': {'argv': ['../scripts/build', '{project}', '{build_dir}'],
+    'compile': {'argv': ['../../scripts/build', '{project}', '{build_dir}'],
                 'artifacts': ['simulator'], 'timeout_seconds': 600},
     'scheduler': {'kind': 'local'},
 }
@@ -407,16 +418,20 @@ filelist、DPI Makefile 按工程根解析；脚本、模型和其他依赖可�
 ```sh
 nsim run --case smoke -sub submit_demo -o /path/to/output --dry-run
 ```
-'''
+'''.replace('../scripts/', '../../scripts/')
 
 
-def scaffold():
+def scaffold(submit_dir='submit', filelist='filelist/sim.f', script_dir='scripts'):
     files = {f'common/{mode}.json': pretty(common_submit(mode)) for mode in MODES}
-    full = full_vcs_demo()
+    full = full_vcs_demo(submit_dir, filelist, script_dir)
     full.update(name='vcs_full', extends='../common/rtl.json')
     command = deepcopy(COMMAND_DEMO)
     command['extends'] = '../common/fpga.json'
-    files.update({'submit_demo.json': pretty(file_demo()), 'submit_demo.md': guide(),
+    script_prefix = posixpath.relpath(script_dir, submit_dir + '/examples') + '/'
+    command['compile']['argv'][0] = script_prefix + 'build'
+    files.update({'submit_demo.json': pretty(file_demo(submit_dir)),
+                  'submit_demo.md': (guide().replace('submit/', submit_dir + '/')
+                                     .replace('filelist/sim.f', filelist).replace('../../scripts/', script_prefix)),
                   'examples/vcs_full.json': pretty(full), 'examples/command.json': pretty(command),
                   'examples/fake.json': pretty(FAKE_DEMO),
                   'demo_inputs/vcs/coverage.hier': '// Replace tb.dut with your DUT hierarchy.\n+tree tb.dut\n',

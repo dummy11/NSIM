@@ -46,12 +46,14 @@ def config(value):
     return result
 
 
-def defaults():
+def defaults(layout=None):
     """Scaffold policy only. The runtime never falls back to these directories."""
-    return {'submit': {'roots': {'local': 'submit'}, 'write_root': 'local',
-                       'templates': {mode: f'submit/common/{mode}.json' for mode in MODES}},
-            'caselist': {'roots': {'local': 'caselist'}},
-            'regrlist': {'roots': {'local': 'regression'}}}
+    from nsim.project_layout import default
+    layout = layout or default()
+    return {'submit': {'roots': {'local': layout['submit']}, 'write_root': 'local',
+                       'templates': {mode: f"{layout['submit']}/common/{mode}.json" for mode in MODES}},
+            'caselist': {'roots': {'local': layout['caselist']}},
+            'regrlist': {'roots': {'local': layout['regression']}}}
 
 
 def toml(value):

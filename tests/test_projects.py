@@ -73,6 +73,10 @@ class ProjectTests(unittest.TestCase):
         root = self.base / 'verification'
         self.assertTrue((root / 'submit').is_dir())
         self.assertTrue((root / 'filelist' / 'tb.f').is_file())
+        for folder in ('submit', 'filelist', 'caselist', 'regression', 'resources', 'scripts'):
+            self.assertTrue((root / folder).is_dir(), folder)
+        self.assertEqual(load_project(root).layout,
+                         {kind: kind for kind in ('submit', 'filelist', 'caselist', 'regression', 'resources', 'scripts')})
         self.assertEqual((root / '.nsim' / '.nsim_version').read_text(), get_version() + '\n')
         project = load_project(root)
         self.assertEqual(project.rtl_root, self.rtl)
@@ -87,6 +91,57 @@ class ProjectTests(unittest.TestCase):
         self.assertTrue(projects.status()['registered'])
         self.assertIn('empty', str(projects.status()['issues']))
         self.assertEqual(len(projects.list_projects()), 1)
+
+    def test_bootstrap_custom_layout_is_recorded_and_used_by_generated_examples(self):
+        paths = {'submit': 'flows/config', 'caselist': 'tests/suites', 'regression': 'plans/batches',
+                 'filelist': 'sources/lists', 'resources': 'data/assets', 'scripts': 'tools/hooks'}
+        root = self.base / 'verification'
+        args = ['bootstrap', '--rtl-root', self.rtl, '--rtl-filelist', self.rtl / 'rtl.f']
+        for kind, path in paths.items():
+            args.extend(['--' + kind + '-dir', path])
+        self.cli(*args, cwd=self.base)
+        project = load_project(root)
+        self.assertEqual(project.layout, paths)
+        for folder in paths.values():
+            self.assertTrue((root / folder).is_dir(), folder)
+        self.assertTrue((root / paths['filelist'] / 'tb.f').is_file())
+        self.assertTrue((root / paths['filelist'] / 'sim.f').is_file())
+        self.assertTrue((root / paths['submit'] / 'submit_demo.json').is_file())
+        self.assertTrue((root / paths['caselist'] / '00_legacy.caselist').is_file())
+        self.assertFalse((root / 'submit').exists())
+        self.assertEqual(project.catalog['submit']['roots']['local'], paths['submit'])
+        self.assertEqual(project.catalog['caselist']['roots']['local'], paths['caselist'])
+        self.assertEqual(project.catalog['regrlist']['roots']['local'], paths['regression'])
+        self.assertEqual(project.catalog['submit']['templates']['rtl'], paths['submit'] + '/common/rtl.json')
+        demo = load_submit(root / paths['submit'] / 'submit_demo.json')
+        self.assertEqual(demo['files']['firmware']['path'], paths['submit'] + '/demo_inputs/data/boot.hex')
+        full = load_submit(root / paths['submit'] / 'examples/vcs_full.json')
+        self.assertEqual(full['vcs']['filelist'], paths['filelist'] + '/sim.f')
+        self.assertEqual(full['hooks']['pre_compile'][0]['argv'][0], str(root / paths['scripts'] / 'prepare'))
+        (root / 'tb.sv').write_text('module tb; endmodule\n')
+        (root / paths['filelist'] / 'tb.f').write_text('tb.sv\n')
+        output = self.base / 'output'
+        output.mkdir()
+        preview = self.cli('run', '--project', root, '-sub', 'submit_demo', '--case', 'smoke',
+                           '-o', output, '--dry-run', cwd=self.base)
+        plan = json.loads((Path(json.loads(preview.stdout)['record_dir']) / 'plan.json').read_text())
+        self.assertEqual(plan['submits'][0]['vcs']['filelist'], str(root / paths['filelist'] / 'sim.f'))
+        self.assertEqual(plan['references'][0]['path'], str(root / paths['submit'] / 'submit_demo.json'))
+        self.cli('submit', 'new', 'new_one', '--project', root, cwd=self.base)
+        self.assertTrue((root / paths['submit'] / 'new_one.json').is_file())
+        self.cli('update', '--project', root, '--rtl-filelist', self.rtl / 'rtl.f')
+        self.assertEqual(load_project(root).layout, paths)
+        self.assertTrue((root / paths['filelist'] / 'sim.f').is_file())
+        self.assertEqual(projects.bootstrap(self.options(verification_root=root, submit_dir=paths['submit']))['action'], 'already_registered')
+        with self.assertRaisesRegex(ProjectError, 'layout differs'):
+            projects.bootstrap(self.options(verification_root=root, submit_dir='different'))
+
+    def test_bootstrap_rejects_layout_escape_without_writing(self):
+        root = self.base / 'verification'
+        for value in ('', '../outside', '/absolute', '.nsim/internal', 'a/../b'):
+            with self.subTest(value=value), self.assertRaises(ConfigError):
+                self.boot(submit_dir=value)
+            self.assertFalse(root.exists())
 
     def test_bootstrap_storage_defaults_resolve_from_calling_directory(self):
         self.boot(output_root=['output', 'backup'])

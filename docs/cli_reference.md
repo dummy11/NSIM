@@ -130,12 +130,14 @@
 | `--verification-root PATH` | 验证根目录；省略时发现当前工程，否则使用当前目录下的 `NAME` 或 `verification` |
 | `--rtl-root PATH` | RTL 根目录；新建工程必填 |
 | `--rtl-filelist PATH` | RTL filelist；新建工程必填 |
-| `--verification-filelist PATH` | 验证 filelist；省略时使用并按需创建验证根下的 `filelist/tb.f` |
+| `--verification-filelist PATH` | 验证 filelist；省略时在选定的 filelist 目录按需创建 `tb.f` |
+| `--filelist-dir DIR`、`--caselist-dir DIR`、`--regression-dir DIR` | 选择对应初始化目录；相对验证工程根，默认各自的同名目录 |
+| `--submit-dir DIR`、`--resources-dir DIR`、`--scripts-dir DIR` | 选择配置、输入资源和脚本目录；相对验证工程根，默认各自的同名目录 |
 | `--nsim-version VERSION` | 选择已安装的版本；省略或 `latest` 时选择兼容的已安装稳定版本 |
 | `--output-root PATH` | 保存项目可选的输出根；若保存多个，执行时需用 `-o` 明确选一个 |
 | `--json` | 输出 JSON |
 
-已有工程再次 bootstrap 用于注册或确认现有配置。修改配置使用 update。
+bootstrap 默认创建上述六类目录并将位置写入 `.nsim/nsim.toml` 的 `[layout]`；submit/caselist/regression 的名称映射同步生成于 `[catalog]`。自定义目录要求位于工程内。已有工程再次 bootstrap 用于注册或确认现有配置，不重建布局。详见 [TOML 名称与文件映射](catalog.md)。
 
 ### update
 

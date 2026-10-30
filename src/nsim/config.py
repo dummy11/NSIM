@@ -107,6 +107,7 @@ class Project:
     verification_filelist: Optional[Path] = None
     output_roots: List[Path] = field(default_factory=list)
     catalog: Dict[str, Any] = field(default_factory=dict)
+    layout: Dict[str, str] = field(default_factory=dict)
 
     @property
     def root(self):
@@ -132,7 +133,7 @@ def load_project(path: Path, validate=True) -> Project:
     schema = integer(data.get('schema_version'), 'schema_version')
     if schema == 2:
         fields(data, {'schema_version', 'name', 'inputs', 'rtl_root', 'rtl_filelist', 'verification_filelist',
-                      'output_roots', 'event_root', 'catalog'},
+                      'output_roots', 'event_root', 'catalog', 'layout'},
                {'schema_version', 'name', 'rtl_root', 'rtl_filelist', 'verification_filelist'}, 'project')
         if path.parent.name != '.nsim' or path.name != 'nsim.toml':
             raise ConfigError('schema 2 requires verification/.nsim/nsim.toml')
@@ -159,7 +160,9 @@ def load_project(path: Path, validate=True) -> Project:
                 if not p.is_file():
                     raise ConfigError(f'project input is not a file: {p}')
         from nsim.catalog import config as catalog_config
-        return Project(path, data['name'], paths, root, schema, catalog=catalog_config(data.get('catalog', {})), **resolved)
+        from nsim.project_layout import validate as layout_config
+        return Project(path, data['name'], paths, root, schema, catalog=catalog_config(data.get('catalog', {})),
+                       layout=layout_config(data.get('layout', {})), **resolved)
     fields(data, {"schema_version", "name", "inputs", "source_root", "catalog"}, {"schema_version", "name"}, "project")
     if schema != 1:
         raise ConfigError("unsupported project schema version")

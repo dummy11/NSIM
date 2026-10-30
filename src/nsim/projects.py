@@ -304,7 +304,10 @@ def config_bytes(project):
     if project.output_roots:
         values['output_roots'] = [relative(p) for p in project.output_roots]
     from nsim.catalog import toml
+    from nsim.project_layout import validate as layout_config
     return ('\n'.join(f'{k} = {json.dumps(v, ensure_ascii=False)}' for k, v in values.items()) + '\n' +
+            '\n[layout]\n' + '\n'.join(f'{key} = {json.dumps(value, ensure_ascii=False)}'
+                                     for key, value in layout_config(project.layout).items()) + '\n' +
             toml(project.catalog)).encode()
 
 
@@ -336,6 +339,8 @@ def check_registration(registry, root, project_name):
 
 def bootstrap(options):
     with registry_lock(write=True):
+        from nsim.project_layout import KINDS, from_options, directory
+        requested_layout = {kind: getattr(options, kind + '_dir', None) for kind in KINDS}
         if options.verification_root is not None:
             root = Path(options.verification_root).expanduser().resolve()
         else:
@@ -360,6 +365,9 @@ def bootstrap(options):
                     value = getattr(options, key)
                     if value is not None and Path(value).expanduser().resolve() != getattr(project, key):
                         raise ProjectError('configuration differs; register existing configuration first, then use nsim update')
+                for kind, value in requested_layout.items():
+                    if value is not None and from_options(options)[kind] != project.layout[kind]:
+                        raise ProjectError('layout differs; register existing configuration first')
                 for key, value in storage_changes(options).items():
                     if value != getattr(project, key):
                         raise ProjectError('storage configuration differs; use nsim update')
@@ -376,25 +384,33 @@ def bootstrap(options):
                 if options.rtl_root is None or options.rtl_filelist is None:
                     raise ProjectError('new projects require --rtl-root and --rtl-filelist')
                 pin = select_version(options.nsim_version)
-                tb = Path(options.verification_filelist).expanduser().resolve() if options.verification_filelist else root / 'filelist' / 'tb.f'
+                layout = from_options(options)
+                tb = (Path(options.verification_filelist).expanduser().resolve() if options.verification_filelist
+                      else root / layout['filelist'] / 'tb.f')
                 from nsim.catalog import defaults
                 project = Project(root / '.nsim' / 'nsim.toml', project_name, [], root, 2,
                                   Path(options.rtl_root).expanduser().resolve(),
                                   Path(options.rtl_filelist).expanduser().resolve(), tb,
-                                  catalog=defaults(), **storage_changes(options))
+                                  catalog=defaults(layout), layout=layout, **storage_changes(options))
                 validate_project(project, missing_tb=tb if options.verification_filelist is None else None)
                 files = {project.descriptor: config_bytes(project), root / '.nsim' / '.nsim_version': (pin + '\n').encode()}
                 if options.verification_filelist is None and not tb.exists():
                     files[tb] = TB_TEMPLATE.encode()
-                check_map(root / 'filelist' / 'sim.f')
-                files[root / 'filelist' / 'sim.f'] = sim_bytes(project)
+                managed_map = directory(project, 'filelist') / 'sim.f'
+                check_map(managed_map)
+                files[managed_map] = sim_bytes(project)
                 from nsim.submit_templates import scaffold
                 from nsim.caselist_templates import scaffold as case_scaffold
-                directories = [root / 'submit', root / 'submit' / 'common', root / 'filelist', root / 'caselist', root / 'regression']
+                directories = [directory(project, kind) for kind in KINDS]
+                directories.append(directory(project, 'submit') / 'common')
                 for directory in directories:
+                    resolved = directory.resolve()
+                    if root not in resolved.parents:
+                        raise ProjectError(f'layout directory leaves verification root: {directory}')
                     if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
                         raise ProjectError(f'expected a real directory: {directory}')
-                for folder, templates in (('submit', scaffold()), ('caselist', case_scaffold())):
+                for folder, templates in ((layout['submit'], scaffold(layout['submit'], layout['filelist'] + '/sim.f', layout['scripts'])),
+                                          (layout['caselist'], case_scaffold())):
                     for relative, content in templates.items():
                         destination = root / folder / relative
                         check_destination(destination)
@@ -435,8 +451,10 @@ def update(options):
                     raise ProjectError('schema 2 updates require nsim.toml')
                 files[project.descriptor] = config_bytes(revised)
                 if any(key in changes for key in EDIT_FIELDS):
-                    check_map(root / 'filelist' / 'sim.f')
-                    files[root / 'filelist' / 'sim.f'] = sim_bytes(revised)
+                    from nsim.project_layout import directory
+                    managed_map = directory(revised, 'filelist') / 'sim.f'
+                    check_map(managed_map)
+                    files[managed_map] = sim_bytes(revised)
             pin = root / '.nsim' / '.nsim_version'
             if options.nsim_version is not None:
                 selected = select_version(options.nsim_version)
@@ -520,6 +538,9 @@ def add_commands(commands):
     add_argument(boot, '--verification-root', type=Path)
     for key in (*EDIT_FIELDS, 'nsim_version'):
         add_argument(boot, '--' + key.replace('_', '-'))
+    from nsim.project_layout import KINDS
+    for kind in KINDS:
+        add_argument(boot, '--' + kind + '-dir', help=f'Place {kind} under this project-relative directory')
     edit = add_command(commands, 'update', help='update registered project configuration')
     add_argument(edit, '--project')
     for key in (*EDIT_FIELDS, 'nsim_version'):

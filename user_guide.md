@@ -17,6 +17,7 @@
 | 编译、单跑和回归 | [执行阶段](docs/execution_stages.md)、[LSF 与 local](docs/lsf_execution.md) |
 | 接入工程命令与结果检查 | [执行协议](docs/local_execution.md)、[Hooks 与日志分析](docs/hooks_and_log_analysis.md) |
 | 查看进度、报告、重跑与恢复 | [终端 Dashboard](docs/dashboard.md)、[报告与重跑](#检查报告重跑和恢复) |
+| 回归结束后如何 inspect、release、rerun、recover | [回归收尾流程与场景示例](docs/post_regression_workflow.md) |
 | 预览原生 VCS/DPI/Verdi 命令 | [EDA dry-run](docs/eda_dry_run.md) |
 
 ## 当前能力

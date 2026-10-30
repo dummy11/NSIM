@@ -143,6 +143,9 @@ regr_dir/<本轮目录>/
 
 ## 检查与安全释放
 
+从回归结果检查到占用释放、rerun/recover 选择和手动汇总的完整步骤见
+[回归收尾流程](post_regression_workflow.md)。以下命令仅处理 LSF 占用。
+
 ```sh
 # 只读查看本地保存的占用，不查询 LSF
 nsim lsf inspect /data/output/regr_dir/本轮目录

@@ -67,9 +67,12 @@ nsim run -s rtl -c smoke -S 42 -n
 
 ## 报告与失败处理
 
+完整步骤、任务选择、LSF 占用释放及报告汇总见 [回归收尾流程](post_regression_workflow.md)。
+下面的 rr/rc 按失败类型选择执行，不是每轮都依次执行。
+
 ```sh
 # 将路径替换为运行返回的 record_dir
-nsim rpt show /path/to/record_dir
+nsim rpt /path/to/record_dir
 nsim rr /path/to/record_dir
 nsim rr /path/to/record_dir -j 4
 nsim rc /path/to/record_dir -o /scratch/backup_out

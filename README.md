@@ -81,6 +81,7 @@ mkdir -p /tmp/nsim-output /tmp/nsim-backup
 | 目标、范围和接口决策 | [开发规划](docs/plan.md) |
 | 模块、数据流与执行契约 | [nsim 实现架构](docs/architecture.md) |
 | 逻辑用例、seq/plusargs、自定义映射与 demo | [Caselist 语法](docs/caselist.md) |
+| 回归结束后检查占用、释放、重跑与恢复 | [回归收尾流程](docs/post_regression_workflow.md) |
 | 当前实现和历史验证范围 | [实现状态](docs/implementation_status.md) |
 | 待实现功能及真实环境验收 | [开发待办](docs/backlog.md) |
 | 构建、模板说明同步与发布 | [构建与发布](docs/releasing.md) |

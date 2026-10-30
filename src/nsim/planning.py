@@ -107,12 +107,18 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
         cases, seeds = ['compile'], [1]
     # Capture configuration bytes before parsing; reject any read/parse race below.
     descriptors = [descriptor_path(project_path)]
+    descriptor_bytes = descriptors[0].read_bytes()
+    project = load_project(Path(project_path))
+    from nsim.catalog import resolve_many
+    submit_paths, references = resolve_many(project, 'submit', submit_paths)
+    caselists, case_references = resolve_many(project, 'caselist',
+        caselist if isinstance(caselist, (list, tuple)) else [caselist] if caselist else [])
+    references.extend(case_references)
     config_paths = descriptors + [Path(p).resolve() for p in submit_paths]
-    caselists = list(dict.fromkeys(Path(p).resolve() for p in (
-        caselist if isinstance(caselist, (list, tuple)) else [caselist] if caselist else [])))
     config_paths.extend(caselists)
     config_bytes = {str(p): p.read_bytes() for p in config_paths}
-    project = load_project(Path(project_path))
+    if config_bytes[str(descriptors[0])] != descriptor_bytes:
+        raise ConfigError('project configuration changed during reference resolution; retry')
     execution_options = dict(execution_options or {})
     if execution_options.get('cm_hier') is not None:
         hierarchy = (project.root / execution_options['cm_hier']).resolve()
@@ -326,6 +332,7 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
             'plusargs': list(plusargs),
             'seed_selection': {'source': seed_source, 'repeat': repeat, 'values': seeds},
             'caselists': [str(p) for p in caselists],
+            'references': references,
             'case_definitions': case_records,
             "kind": 'regression' if regression else 'case',
             "project": {"name": project.name,

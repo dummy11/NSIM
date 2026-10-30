@@ -119,6 +119,21 @@ class ProjectTests(unittest.TestCase):
         self.assertNotIn('event_root', status)
         self.assertEqual(status['output_roots'], [str(self.base / p) for p in ('new-output', 'new-backup')])
 
+    def test_update_and_switch_preserve_custom_catalog(self):
+        self.boot()
+        root = self.base / 'verification'
+        project = load_project(root)
+        project.catalog['submit']['roots']['local'] = 'custom flows'
+        project.catalog['submit']['aliases'] = {'debug': '../shared/config.json'}
+        project.catalog['regrlist']['aliases'] = {'nightly': 'plans/nightly.txt'}
+        project.descriptor.write_bytes(projects.config_bytes(project))
+        self.cli('update', '--project', 'verification', '--output-root', 'new-output')
+        self.cli('switch', get_version(), '--project', 'verification')
+        self.assertEqual(load_project(root).catalog, project.catalog)
+        before = project.descriptor.read_bytes()
+        self.boot()
+        self.assertEqual(project.descriptor.read_bytes(), before)
+
     def test_stable_launcher_runs_with_saved_storage_and_cli_overrides(self):
         spec = importlib.util.spec_from_file_location('nsim_storage_installer', REPO / 'nsim-install.py')
         installer = importlib.util.module_from_spec(spec)
@@ -172,7 +187,7 @@ class ProjectTests(unittest.TestCase):
         for setting in ('output_roots = "out"', 'output_roots = []', 'output_roots = [1]',
                         'output_roots = [""]', 'event_root = 1', 'event_root = ""'):
             with self.subTest(setting=setting):
-                descriptor.write_text(original + setting + '\n')
+                descriptor.write_text(setting + '\n' + original)
                 with self.assertRaises(ConfigError):
                     load_project(descriptor)
 
@@ -180,7 +195,7 @@ class ProjectTests(unittest.TestCase):
         self.boot(output_root=['output'])
         root = self.base / 'verification'
         descriptor = root / '.nsim' / 'nsim.toml'
-        descriptor.write_text(descriptor.read_text() + 'event_root = "/obsolete/events"\n')
+        descriptor.write_text('event_root = "/obsolete/events"\n' + descriptor.read_text())
         self.assertNotIn('event_root', projects.status(root))
         self.cli('update', '--project', 'verification', '--output-root', 'new-output')
         self.assertNotIn('event_root', descriptor.read_text())

@@ -21,7 +21,7 @@ nsim regr -rl regression/nightly.list -o /data/output --dry-run
 - `-l` 仍表示一个或多个 caselist，`-rl` 表示批量回归清单，两者互斥。
 - 行内支持所有单次 regr 执行选项，包括多个 submit/caselist、repeat/seed、mode、目录、local/LSF、队列、资源和并发。
 - 空行与 `#` 注释忽略，参数值支持引号。一个物理行对应一次回归；不执行 shell、变量替换、管道或命令替换，不支持嵌套 `-rl`。
-- 相对路径与把这一行复制到终端执行时一致：相对启动命令的工作目录，而非 regression list 所在目录。裸 submit 名仍按工程 submit 目录查找。
+- `-sub/-l/-rl` 的短名称通过项目 TOML catalog 映射；例如 `nsim regr -rl nightly`。名称解析不受启动目录影响，详见 [名称映射](catalog.md)。行内显式相对路径仍相对启动命令的工作目录，而非 regression list 所在目录；同目录文件请用 `./文件名` 明确表示路径。
 - 各行参数互不继承。外层仅接受 `-rl`、`--project`、`-o`、`--dry-run`。项目和输出根作为默认值，行内显式值优先；外层 dry-run 强制所有行预览。
 - 行内 `-jobs` 是该次回归未结束作业上限，包含排队/运行/暂停和真实编译作业，不是 CPU 核数；没有批次并发选项。
 - 每行展开为 submit × 合并去重后的 case × seed。行内保持原有冲突检查，跨行不组合、不去重。完全相同的两行也是两次执行。

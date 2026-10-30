@@ -169,13 +169,15 @@
 | --- | --- | --- |
 | `submit new NAME` | `--project NAME_OR_PATH` | 工程，默认发现当前工程 |
 | `submit new NAME` | `-mode / --mode MODE` | 默认 `rtl`；指定父模板时可推导其模式 |
-| `submit new NAME` | `--extends PARENT` | 父模板路径，相对工程的 `submit/` 或使用绝对路径 |
+| `submit new NAME` | `--extends PARENT` | 父模板路径，相对 TOML 指定的新 submit 目录或使用绝对路径 |
 | `submit show SUBMIT` | `--project NAME_OR_PATH` | 工程，默认发现当前工程 |
 | `submit check SUBMIT` | `--project NAME_OR_PATH` | 工程，默认发现当前工程 |
 
 `MODE` 可选 `rtl`、`gate`、`fpga`、`haps`、`zebu`、`palladium`。这三个命令均输出 JSON，无需另加 `--json`。
 
-`SUBMIT` 支持工程 `submit/` 下的裸名称、带 `.json` 的名称或显式文件路径。当前目录存在同名文件时优先使用该文件；显式相对路径按调用目录解析。`check` 校验配置、继承及 `files` 声明的存在性和成员集合；`show/check` 返回 `resolved_files`。RTL/TB 清单、工具及完整命令预览用执行命令的 `--dry-run` 检查。辅助文件的 `{file:NAME}` 引用、阶段和路径规则见 [Submit 语法](submit.md)。
+`SUBMIT` 支持项目 TOML catalog 名称、`命名空间:名称` 或显式文件路径。显式相对路径按调用目录解析，同目录文件写成 `./文件名`；当前目录同名文件不影响名称映射。`new` 从 catalog.submit.write_root 和 templates 读取创建目录及默认父模板。`check` 校验配置、继承及 `files` 声明的存在性和成员集合；`show/check` 返回 `resolved_files`。RTL/TB 清单、工具及完整命令预览用执行命令的 `--dry-run` 检查。详见 [名称映射](catalog.md) 和 [Submit 语法](submit.md)。
+
+`nsim catalog list submit|caselist|regrlist` 列出配置的名称与文件，`nsim catalog resolve KIND REF` 展示某个引用的实际路径和命中规则。两者支持 `--project`，均为只读 JSON 查询。
 
 ## 编译、仿真与回归选项
 
@@ -330,7 +332,7 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 | --- | --- |
 | `--output-root PATH` | 执行（rerun 除外）、recover 和项目配置命令用 `-o PATH`；长期默认值用 `nsim update --output-root PATH` 保存一次 |
 | `--caselist FILE...` | `-l FILE...` |
-| `--submit FILE...` | `-s NAME...`，文件放在工程 `submit/` 下即可用裸名称 |
+| `--submit FILE...` | `-s NAME...`，短名称通过项目 TOML catalog 映射 |
 | `--seed N...` | `-S N...`；回归随机采样用 `-r N` |
 | `--jobs N` | 执行及重跑命令用 `-j N` |
 | `--queue QUEUE` | `-q QUEUE` |

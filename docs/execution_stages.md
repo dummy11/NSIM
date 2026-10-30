@@ -84,7 +84,7 @@ Linux 执行节点需要可用的 bubblewrap（bwrap）及 namespace 支持，ma
 
 ## 常用命令
 
-以下示例假设已登记 `verification`，通过 `bootstrap` 或 `update --output-root` 保存输出根，且 submit 路径从当前目录可访问。`--project verification` 可从工程外调用；在项目目录或其子目录中可省略 --project。裸 submit 名称从项目的 submit/<名称>.json 解析；显式路径按当前调用目录解析；当前目录已有同名文件时优先使用该文件。
+以下示例假设已登记 `verification`，通过 `bootstrap` 或 `update --output-root` 保存输出根，且 submit 路径从当前目录可访问。`--project verification` 可从工程外调用；在项目目录或其子目录中可省略 --project。submit/caselist/regrlist 短名称统一从项目 TOML catalog 解析；显式路径按当前调用目录解析。同目录文件用 `./文件名`，不会覆盖短名称的映射，详见 [名称映射](catalog.md)。
 
 ```sh
 # 一次完成编译、仿真及结果检查

@@ -22,6 +22,7 @@
 | 安装位置或维护多个工具版本 | [安装器和版本目录](#安装器和版本目录)、[离线安装](#网络受限服务器离线包)、[联网获取](#联网获取与切换) |
 | 初始化、登记和维护验证项目 | [项目初始化](#项目初始化与注册)、[查看与更新](#查看与更新当前项目)、[选择版本](#工程如何选择版本) |
 | 配置输入、输出和 submit | [路径规则](#配置文件与路径规则)、[默认输出目录](#一次配置输出目录日常运行自动读取)、[Submit 语法](docs/submit.md) |
+| 自定义目录，使用短名称选择 submit/清单 | [TOML 名称与文件映射](docs/catalog.md)，含旧项目迁移、重名处理及 case 无需 manifest 的说明 |
 | 编写逻辑用例、seq/C 测试和自定义运行参数 | [Caselist 语法与示例](docs/caselist.md) |
 | 编译与独立单跑 | [独立单跑](docs/single_run.md)、[执行阶段细节](docs/execution_stages.md) |
 | 单次与批量回归 | [回归流程](docs/regression_workflow.md)、[批量清单与目录细节](docs/regression_batches.md) |

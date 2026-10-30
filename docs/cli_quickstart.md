@@ -6,7 +6,9 @@
 
 ## 日常只记这几个
 
-以下示例在已配置好的验证工程目录内执行，假设已有可用的 `submit/rtl.json` 和 `caselist/smoke.list`。裸 submit 名称会从工程的 `submit/` 下查找；清单路径相对当前目录。
+以下示例在已配置好的验证工程目录内执行，假设已有可用的 rtl submit 和 smoke caselist。
+短名称通过项目 TOML 的 catalog 映射解析；bootstrap 默认登记 submit/caselist/regression 目录，均可修改。
+旧项目需补充映射或使用 `./文件` 等显式路径，见 [TOML 名称与文件映射](catalog.md)。
 
 ```sh
 # 保存默认输出位置一次，后续不必反复输入 -o
@@ -27,10 +29,10 @@ nsim com -s rtl
 nsim sim -s rtl -c smoke -S 42
 
 # 回归：4 个并发任务
-nsim regr -s rtl -l caselist/smoke.list -j 4
+nsim regr -s rtl -l smoke -j 4
 
 # 每个用例使用 10 个不同随机 seed
-nsim regr -s rtl -l caselist/smoke.list -r 10 -j 4
+nsim regr -s rtl -l smoke -r 10 -j 4
 
 # 只生成执行计划和命令预览
 nsim run -s rtl -c smoke -S 42 -n

@@ -19,11 +19,11 @@ def add_commands(commands):
     add_argument(new, 'name', help='New submit name; an optional .json suffix is accepted')
     add_argument(new, '--project', type=Path, help='Project name/path; default: current project')
     add_argument(new, '-mode', '--mode', choices=MODES, help='Default: rtl, or the explicit parent mode')
-    add_argument(new, '--extends', dest='parent', help='Parent path relative to project/submit, or absolute path')
+    add_argument(new, '--extends', dest='parent', help='Parent path relative to the configured submit write root, or absolute path')
     for action in ('show', 'check'):
         command = add_command(actions, action, help=('Show merged configuration and source paths' if action == 'show'
                                                    else 'Validate configuration without running a job'))
-        add_argument(command, 'submit', type=Path, help='Submit name under project/submit, or an explicit JSON path')
+        add_argument(command, 'submit', help='Submit TOML catalog name or an explicit JSON path')
         add_argument(command, '--project', type=Path, help='Project name/path; default: current project')
 
 
@@ -36,18 +36,32 @@ def create(root, identifier, mode=None, parent=None):
     root = Path(root).resolve()
     with registry_lock(write=True), project_lock(root):
         project = load_project(root, validate=False)
-        target = root / 'submit' / (identifier + '.json')
+        from nsim.catalog import anchored, creation_directory
+        directory = creation_directory(project)
+        if directory != root and root not in directory.parents:
+            raise ConfigError('submit new write_root must be inside the project; external catalogs are read-only')
+        if identifier in project.catalog.get('submit', {}).get('aliases', {}):
+            raise ConfigError(f'submit alias already exists: {identifier}; choose another name')
+        target = directory / (identifier + '.json')
         check_destination(target)
         if os.path.lexists(target):
             raise ConfigError(f'submit already exists; choose another name: {target}')
-        reference = parent if parent is not None else f'common/{mode or "rtl"}.json'
-        if not isinstance(reference, str) or not reference.strip() or '\0' in reference:
+        if parent is None:
+            template = project.catalog.get('submit', {}).get('templates', {}).get(mode or 'rtl')
+            if template is None:
+                raise ConfigError(f'configure catalog.submit.templates.{mode or "rtl"}, or specify --extends')
+            parent_path = anchored(project, template)
+        elif not isinstance(parent, str) or not parent.strip() or '\0' in parent:
             raise ConfigError('extends must be a single non-empty parent path')
-        parent_path = (target.parent / reference).resolve()
+        else:
+            parent_path = (target.parent / parent).resolve()
+        reference = os.path.relpath(parent_path, target.parent)
         files = {}
         if parent is None and not parent_path.exists():
             # Also support projects created before common templates were introduced.
-            check_destination(target.parent / reference)
+            if root not in parent_path.parents:
+                raise ConfigError('cannot create a missing common template outside the project')
+            check_destination(parent_path)
             files[parent_path] = pretty(common_submit(mode or 'rtl')).encode('utf-8')
         child = {'schema_version': 1, 'name': identifier, 'extends': reference}
         files[target] = pretty(child).encode('utf-8')
@@ -74,23 +88,23 @@ def inspect(root, path):
         sources = {}
         try:
             project = load_project(root, validate=False)
+            from nsim.catalog import resolve
+            path, reference = resolve(project, 'submit', path)
             effective = load_submit(path, sources, project_root=project.root)
         except ConfigError as exc:
             raise ConfigError(f'{path}: {exc}') from exc
         from nsim.submit_files import collect
         resolved_files = collect(effective['files'], project.root)
-        return {'path': str(path), 'configuration_valid': True, 'source_chain': list(sources),
+        return {'path': str(path), 'reference': reference, 'configuration_valid': True, 'source_chain': list(sources),
                 'effective': effective, 'resolved_files': resolved_files}
 
 
 def dispatch(args):
-    from nsim.cli import resolve_submits
     root = resolve_root(args.project)
     if args.action == 'new':
         result = create(root, args.name, args.mode, args.parent)
     else:
-        path = resolve_submits(root, [args.submit])[0]
-        result = inspect(root, path)
+        result = inspect(root, args.submit)
         if args.action == 'check':
             effective = result.pop('effective')
             result.update(name=effective['name'], mode=effective['mode'], adapter=effective['adapter'],

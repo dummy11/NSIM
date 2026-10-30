@@ -12,6 +12,8 @@ NSIM 用于开发、测试和发布 `nsim`，保存工具源码、测试、示�
 
 正文用 `NSIM` 指仓库、`nsim` 指工具。已有环境变量、接口字段、文件路径与真实终端输出保持原有拼写。
 
+submit、caselist、regression list 的短名称通过项目 TOML 配置位置，见 [名称与文件映射](docs/catalog.md)。目录布局由工程决定。
+
 ## 仓库结构
 
 | 路径 | 内容 |

@@ -36,6 +36,8 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
     add_commands(commands)
     from nsim.lsf_commands import add_commands as add_lsf_commands
     add_lsf_commands(commands)
+    from nsim.catalog import add_commands as add_catalog_commands
+    add_catalog_commands(commands)
     capabilities = add_command(commands, 'capabilities', help='supported project schemas')
     add_argument(capabilities, '--json', action='store_true')
     info = add_command(commands, "version", help="Show the tool version for provenance records")
@@ -54,8 +56,8 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
         if stage != 'com':
             if stage == 'regr':
                 selection = execute.add_mutually_exclusive_group(required=True)
-                add_argument(selection, '-l', '--caselist', action='extend', nargs='+', type=Path)
-                add_argument(selection, '-rl', '--regr-list', type=Path, help='Batch list: one regr argument list per line')
+                add_argument(selection, '-l', '--caselist', action='extend', nargs='+', help='TOML catalog names or explicit paths')
+                add_argument(selection, '-rl', '--regr-list', help='Batch catalog name or explicit path; one regr argument list per line')
             else:
                 add_argument(execute, '--case', action='extend', nargs='+', required=True,
                              help='One or more explicit cases; use regr -l for a caselist')
@@ -81,8 +83,8 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
             add_argument(execute, '--define', action='append', default=[], help='VCS compile define NAME[=VALUE]')
             add_argument(execute, '--cm-metrics', help='Override VCS coverage metrics')
             add_argument(execute, '--cm-hier', help='Override the VCS coverage hierarchy file')
-        add_argument(execute, '-sub', '--submit', action='extend', nargs='+', type=Path, required=stage != 'regr',
-                             help='Submit names under project/submit, or explicit JSON paths')
+        add_argument(execute, '-sub', '--submit', action='extend', nargs='+', required=stage != 'regr',
+                             help='Submit TOML catalog names or explicit JSON paths')
         add_argument(execute, '-mode', choices=MODES, help='Default: infer from submits; an explicit mode must match')
         add_argument(execute, '-dir', help='Workspace name (default: selected mode)')
         add_argument(execute, '-com-dir', default='com_dir', help='Compile path relative to workspace, or absolute path')
@@ -140,18 +142,8 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
 
 
 def resolve_submits(root, values):
-    paths = []
-    for value in values:
-        if value.is_absolute() or len(value.parts) > 1 or value.is_file():
-            path = value.resolve()
-        else:
-            filename = value.name if value.suffix == '.json' else value.name + '.json'
-            path = (root / 'submit' / filename).resolve()
-        if not path.is_file():
-            raise ConfigError(f'submit not found: {value} (resolved to {path})')
-        if path not in paths:
-            paths.append(path)
-    return paths
+    from nsim.catalog import resolve_many
+    return resolve_many(load_project(root, validate=False), 'submit', values)[0]
 
 
 def execution_options(args):
@@ -175,11 +167,10 @@ def prepare_execution(args):
         except ValueError as exc:
             raise ConfigError('--license requires resource=positive-integer') from exc
     root = resolve_root(args.project)
-    submits = resolve_submits(root, args.submit)
     selected_options = execution_options(args)
     def planned(seeds, options):
         result = create_plan(root, caselist=getattr(args, "caselist", None),
-                             cases=getattr(args, 'case', None), submit_paths=submits, seeds=seeds,
+                             cases=getattr(args, 'case', None), submit_paths=args.submit, seeds=seeds,
                              allow_missing_tools=args.dry_run, scheduler_overrides=overrides,
                              phase=args.command, mode=args.mode, directory=args.dir,
                              com_dir=args.com_dir, sim_dir=args.sim_dir, repeat=getattr(args, 'repeat', None),
@@ -258,6 +249,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(json.dumps(identity, sort_keys=True) if args.json else "nsim " + identity["version"])
         return 0
     try:
+        if args.command == 'catalog':
+            from nsim.catalog import dispatch
+            return dispatch(args)
         if args.command == 'submit':
             from nsim.submit_commands import dispatch
             return dispatch(args)

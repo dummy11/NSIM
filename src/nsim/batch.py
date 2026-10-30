@@ -53,7 +53,13 @@ def new_batch_id(path):
 def prepare_batch(outer):
     from nsim.cli import build_parser, prepare_execution
     from nsim.service import validate_roots
-    path = outer.regr_list.resolve()
+    from nsim.catalog import explicit, resolve
+    from nsim.config import load_project
+    from nsim.project_paths import resolve_root, descriptor_path
+    descriptor = None if explicit(outer.regr_list) else descriptor_path(resolve_root(outer.project))
+    descriptor_bytes = descriptor.read_bytes() if descriptor is not None else None
+    project = load_project(descriptor, validate=False) if descriptor is not None else None
+    path, reference = resolve(project, 'regrlist', outer.regr_list)
     content = path.read_bytes()
     source = content.decode('utf-8')
     source_hash = hashlib.sha256(content).hexdigest()
@@ -84,11 +90,15 @@ def prepare_batch(outer):
         raise ConfigError(f'empty regression list: {path}')
     if digest(path) != source_hash:
         raise ConfigError('regression list changed during planning')
+    if project is not None and project.descriptor.read_bytes() != descriptor_bytes:
+        raise ConfigError('project configuration changed during regression-list resolution; retry')
     roots = outer.output_root or outer.global_output_root or entries[0]['roots']
     for entry in entries:
         validate_roots(entry['plan'], roots)
     batch = dict(schema_version=1, kind='batch', id=batch_id, cwd=str(Path.cwd()),
-                 list=str(path), list_sha256=source_hash, snapshot=source,
+                 list=str(path), list_sha256=source_hash, snapshot=source, reference=reference,
+                 catalog_snapshot=(dict(descriptor=str(descriptor), content=descriptor_bytes.decode('utf-8'))
+                                   if descriptor is not None else None),
                  output_roots=[str(Path(p).resolve()) for p in roots], entries=entries)
     return batch, entries
 

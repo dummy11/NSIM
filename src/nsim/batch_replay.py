@@ -61,6 +61,9 @@ def replay_batch(source, original, state, roots=None, recovery=False, seed=None,
     parent = original.get('execution', {}).get('replay_parent', str(Path('regr_batch_dir') / original['id']))
     batch = {key: copy.deepcopy(original[key]) for key in
              ('schema_version', 'kind', 'cwd', 'list', 'list_sha256', 'snapshot')}
+    for key in ('reference', 'catalog_snapshot'):
+        if key in original:
+            batch[key] = copy.deepcopy(original[key])
     batch.update(id=batch_id, output_roots=[str(root) for root in selected_roots], entries=entries,
                  execution=dict(replay_parent=parent, replay_dir=name), skipped=skipped,
                  source=dict(journal=str(source), id=original['id'], mode=mode,

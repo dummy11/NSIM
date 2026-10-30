@@ -3,6 +3,7 @@
 本页以 `regr` 的单次回归和 regression list 批量回归为主线，集中说明选项、参数优先级、
 目录以及 `inspect/release/rerun/recover`。独立 `run/sim --case` 见 [独立单跑](single_run.md)；
 caselist 的行语法见 [Caselist 语法](caselist.md)，submit 字段见 [Submit 语法](submit.md)。
+`-sub/-l/-rl` 支持 [TOML 名称映射](catalog.md)，配置后可以直接写 `-sub rtl -l smoke` 或 `-rl nightly`。
 
 ## 创建单次或批量回归
 

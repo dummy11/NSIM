@@ -44,6 +44,9 @@ class BatchReplayTests(Fixture):
         plan, checked = load_final(target.parent)
         self.assertTrue(checked['passed'])
         self.assertEqual(plan['source']['id'], old['id'])
+        original, _ = load_final(source)
+        self.assertEqual(plan['reference'], original['reference'])
+        self.assertEqual(plan['catalog_snapshot'], original['catalog_snapshot'])
         for entry, prior in zip(plan['entries'], old['regressions']):
             child = entry['plan']
             self.assertEqual([(t['case'], t['seed']) for t in child['tasks']], [('smoke', 41 + entry['index'])])

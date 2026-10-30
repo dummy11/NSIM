@@ -23,12 +23,14 @@ nsim submit check smoke
 nsim run --case smoke -sub smoke -o /path/to/output --dry-run
 ```
 
-new 自动生成 submit/NAME.json，填好 schema_version、name 和 extends；不复制父配置，
+new 在项目 TOML 的 catalog.submit.write_root 指定目录生成 NAME.json，填好 schema_version、name 和 extends；不复制父配置，
 用户只需添加实际差异。默认选择 RTL，也可通过 --mode 选择其他模式。
 指定 --extends 时从父模板推导 mode，同时指定 --mode 时检查一致性。
 工程已准备自定义父模板时，可用 `nsim submit new special --extends common/rtl_debug.json`。
-父路径相对工程 submit/，也支持绝对路径；不需要相对终端当前目录换算。
-旧项目缺少默认 common 时只补齐本次所需模板；已有同名 submit 不覆盖。
+父路径相对新 submit 所在目录，也支持绝对路径；不需要相对终端当前目录换算。
+默认父模板路径由 catalog.submit.templates 按 mode 配置；缺失时仅在工程内补齐本次模板，已有文件不覆盖。
+submit/caselist/regrlist 的短名称统一由 TOML catalog 的 roots 或 aliases 映射，支持 namespace:name。
+旧工程需补充映射；同目录显式文件使用 ./文件名，不再自动查找固定目录或优先使用当前目录同名文件。
 未配置真实 command.argv 的硬件模板会生成待填写骨架并明确提示，不能直接运行。
 这些命令支持 --project 指定工程，省略时从当前目录及祖先发现工程。
 

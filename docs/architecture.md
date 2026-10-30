@@ -36,6 +36,7 @@ CLI / Project Management / Planner
 | `cli.py`、`projects.py`、`project_paths.py` | 命令解析、项目发现、登记与事务更新 |
 | `config.py`、`submit_config.py`、`submit_templates.py` | 配置校验、父子 submit 合并、新项目模板与随项目语法说明 |
 | `caselist.py`、`caselist_templates.py` | 逻辑用例解析、运行参数映射与分层覆盖、bootstrap 用例示例 |
+| `catalog.py` | submit/caselist/regrlist 的 TOML 目录与别名映射、消歧、查询及创建位置配置 |
 | `planning.py`、`eda.py`、`eda_config.py` | 任务展开、输入/运行时快照、编译身份、EDA 命令预览 |
 | `service.py`、`runner.py`、`compilation.py` | 并发派发、attempt、编译复用与重跑 |
 | `lsf.py`、`lsf_worker.py` | 调度客户端调用、终态确认、执行节点校验与运行 |

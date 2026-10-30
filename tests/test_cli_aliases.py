@@ -87,7 +87,7 @@ class AliasParsingTests(unittest.TestCase):
     def test_mixed_spellings_share_actions_and_constraints(self):
         args = self.parser.parse_args(['run', '-s', 'rtl', '--submit', 'debug', '-c', 'smoke',
                                        '-S', '42', '--seed', '43', '-p', 'old', '--project', 'new'])
-        self.assertEqual(args.submit, [Path('rtl'), Path('debug')])
+        self.assertEqual(args.submit, ['rtl', 'debug'])
         self.assertEqual(args.case, ['smoke'])
         self.assertEqual(args.seed, [42, 43])
         self.assertEqual(args.project, Path('new'))

@@ -18,6 +18,8 @@ from nsim.storage import IntegrityError, write_json
 class RegressionCliTests(Fixture):
     def setUp(self):
         super().setUp()
+        with self.descriptor.open('a') as stream:
+            stream.write('\n[catalog.submit.roots]\nlocal = "submit"\n')
         (self.project / 'submit').mkdir()
         self.submits = []
         for index in range(2):

@@ -24,6 +24,9 @@ class SubmitCommandsTests(Fixture):
         env.start()
         self.addCleanup(env.stop)
         self.folder = self.project / 'submit'
+        from nsim.catalog import defaults, toml
+        with self.descriptor.open('a') as stream:
+            stream.write(toml(defaults()))
 
     def cli(self, *args, success=True, cwd=None):
         result = subprocess.run([sys.executable, '-m', 'nsim', *map(str, args)], cwd=cwd or self.project,

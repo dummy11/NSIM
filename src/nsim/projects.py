@@ -303,7 +303,9 @@ def config_bytes(project):
               'inputs': [relative(p) for p in project.inputs]}
     if project.output_roots:
         values['output_roots'] = [relative(p) for p in project.output_roots]
-    return ('\n'.join(f'{k} = {json.dumps(v, ensure_ascii=False)}' for k, v in values.items()) + '\n').encode()
+    from nsim.catalog import toml
+    return ('\n'.join(f'{k} = {json.dumps(v, ensure_ascii=False)}' for k, v in values.items()) + '\n' +
+            toml(project.catalog)).encode()
 
 
 def sim_bytes(project):
@@ -375,10 +377,11 @@ def bootstrap(options):
                     raise ProjectError('new projects require --rtl-root and --rtl-filelist')
                 pin = select_version(options.nsim_version)
                 tb = Path(options.verification_filelist).expanduser().resolve() if options.verification_filelist else root / 'filelist' / 'tb.f'
+                from nsim.catalog import defaults
                 project = Project(root / '.nsim' / 'nsim.toml', project_name, [], root, 2,
                                   Path(options.rtl_root).expanduser().resolve(),
                                   Path(options.rtl_filelist).expanduser().resolve(), tb,
-                                  **storage_changes(options))
+                                  catalog=defaults(), **storage_changes(options))
                 validate_project(project, missing_tb=tb if options.verification_filelist is None else None)
                 files = {project.descriptor: config_bytes(project), root / '.nsim' / '.nsim_version': (pin + '\n').encode()}
                 if options.verification_filelist is None and not tb.exists():
@@ -387,7 +390,7 @@ def bootstrap(options):
                 files[root / 'filelist' / 'sim.f'] = sim_bytes(project)
                 from nsim.submit_templates import scaffold
                 from nsim.caselist_templates import scaffold as case_scaffold
-                directories = [root / 'submit', root / 'submit' / 'common', root / 'filelist', root / 'caselist']
+                directories = [root / 'submit', root / 'submit' / 'common', root / 'filelist', root / 'caselist', root / 'regression']
                 for directory in directories:
                     if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
                         raise ProjectError(f'expected a real directory: {directory}')

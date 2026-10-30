@@ -126,7 +126,7 @@ command 包装器可在 submit 中用 `+ntb_random_seed={seed}`、`+NSIM_RESULT=
 有效参数相同时去重，否则规划阶段报错，并显示定义来源。不同参数变体请使用不同逻辑名。
 任务键仍是 submit + logic case name + seed；多个 seq 共享 test 时不会被合并。
 plan.json 保存清单和 YAML 原文、哈希、解析定义、最终参数及覆盖来源；commands.json 展示
-最终仿真命令。recover 校验这些历史输入；rerun 读取当前 YAML 和清单配置，但只保留原失败 case/seed，新加入的 case 不会被派发。
+最终仿真命令。整轮回归 recover 校验这些历史输入；rerun 和单跑 recover 读取当前 YAML 和清单配置，保留原任务选择，不增加新 case。整轮 rerun 仅重跑原失败 case/seed，单跑则不按原判定筛选。
 case 参数与 YAML 不进入仿真器编译身份，仅修改运行参数可继续使用已有编译产物。
 
 填写真实 RTL/TB filelist 与 submit 后，可在工程根目录预览：

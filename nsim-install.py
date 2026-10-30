@@ -36,7 +36,7 @@ PROJECT_LAYOUT_SOURCE = '"""Project locations and registry reads; usable without
 
 
 # Generated from src/nsim/cli_aliases.py by scripts/sync_project_layout.py.
-CLI_ALIASES_SOURCE = '"""Explicit CLI aliases, also embedded in the dependency-free launcher."""\n\n\nCOMMAND_ALIASES = {\n    \'bootstrap\': (\'init\',), \'list\': (\'ls\',), \'status\': (\'st\',),\n    \'update\': (\'up\',), \'switch\': (\'use\',), \'project\': (\'proj\',),\n    \'submit\': (\'sub\',), \'capabilities\': (\'caps\',), \'version\': (\'ver\',),\n    \'rerun\': (\'rr\',), \'recover\': (\'rc\',), \'report\': (\'rpt\',),\n    \'storage\': (\'disk\',), \'install\': (\'inst\',), \'versions\': (\'vers\',),\n    \'bundle\': (\'pack\',),\n}\n\nOPTION_ALIASES = {\n    \'--version\': (\'-V\',), \'--json\': (\'-J\',), \'--project\': (\'-p\',),\n    \'--name\': (\'-N\',), \'--verification-root\': (\'-vr\',),\n    \'--rtl-root\': (\'-rtl\',), \'--rtl-filelist\': (\'-rf\',),\n    \'--verification-filelist\': (\'-vf\',), \'--nsim-version\': (\'-nv\',),\n    \'--output-root\': (\'-o\',), \'--case\': (\'-c\',), \'--submit\': (\'-s\',),\n    \'--seed\': (\'-S\',), \'-mode\': (\'-m\', \'--mode\'),\n    \'-dir\': (\'-d\', \'--dir\'), \'-com-dir\': (\'-cd\', \'--com-dir\'),\n    \'-sim-dir\': (\'-sd\', \'--sim-dir\'), \'-repeat\': (\'-r\', \'--repeat\'),\n    \'--jobs\': (\'-j\', \'-jobs\'), \'--retries\': (\'-retry\',),\n    \'--retry-seconds\': (\'-rt\',), \'--min-free-bytes\': (\'-fb\',),\n    \'--min-free-inodes\': (\'-fi\',), \'--dry-run\': (\'-n\',),\n    \'--scheduler\': (\'-sched\',), \'--resource\': (\'-R\',),\n    \'--license\': (\'-lic\',), \'--extends\': (\'-e\',),\n    \'--plusargs\': (\'-pa\',),\n    \'--bundle\': (\'-b\',), \'--wheel\': (\'-w\',), \'--wheelhouse\': (\'-wh\',),\n    \'--checksums\': (\'-sum\',), \'--sha256\': (\'-sha\',), \'--all\': (\'-a\',),\n    \'--user\': (\'-u\',), \'--system\': (\'-sys\',), \'--output\': (\'-o\',),\n    \'--download-deps\': (\'-deps\',), \'--platform\': (\'-plat\',),\n    \'--python-version\': (\'-py\',), \'--implementation\': (\'-impl\',),\n}\n\n\ndef add_argument(parser, *names, **kwargs):\n    """Keep aliases on the original action, including mutually exclusive groups."""\n    expanded = list(names)\n    for name in names:\n        for alias in OPTION_ALIASES.get(name, ()):\n            if alias not in expanded:\n                expanded.append(alias)\n    return parser.add_argument(*expanded, **kwargs)\n\n\ndef add_command(commands, name, **kwargs):\n    parser = commands.add_parser(name, aliases=COMMAND_ALIASES.get(name, ()), **kwargs)\n    parser.set_defaults(**{commands.dest: name})\n    return parser\n\n\ndef canonical_command(name):\n    return next((command for command, aliases in COMMAND_ALIASES.items() if name in aliases), name)\n\n\ndef runtime_arguments(argv):\n    """Expand runtime aliases before selecting/launching an installed wheel.\n\n    Only command positions and option spellings change. Values after \'=\' and\n    positional values (including names such as \'init\') remain untouched.\n    """\n    args = list(argv)\n    index = 0\n    while index < len(args):\n        token = args[index]\n        if token in (\'-o\', \'--output-root\'):\n            index += 2\n        elif token.startswith((\'-o=\', \'--output-root=\')) or (token.startswith(\'-o\') and not token.startswith(\'--\')):\n            index += 1\n        else:\n            break\n    if index >= len(args):\n        return args\n    command = args[index] = canonical_command(args[index])\n    if command == \'project\' and index + 1 < len(args) and args[index + 1] == \'ls\':\n        args[index + 1] = \'list\'\n\n    # Installer options are handled by its own parser. Preserve existing -o/-j\n    # spellings except in commands which have only just gained those aliases.\n    aliases = {alias: option for option, values in OPTION_ALIASES.items()\n               for alias in values if option not in (\n                   \'--bundle\', \'--wheel\', \'--wheelhouse\', \'--checksums\', \'--sha256\',\n                   \'--all\', \'--user\', \'--system\', \'--output\', \'--download-deps\',\n                   \'--platform\', \'--python-version\', \'--implementation\')}\n    if command not in (\'bootstrap\', \'update\'):\n        aliases.pop(\'-o\', None)\n    if command not in (\'rerun\', \'recover\'):\n        aliases.pop(\'-j\', None)\n        aliases.pop(\'-jobs\', None)\n    existing = set(OPTION_ALIASES) | set(aliases) | {\n        \'-sub\', \'-seed\', \'-scheduler\', \'-queue\', \'-q\', \'-l\', \'-jobs\', \'-j\',\n        \'-o\', \'-h\', \'--help\', \'--caselist\', \'--queue\', \'-rl\', \'--regr-list\',\n    }\n    attached = {key: value for key, value in aliases.items()\n                if len(key) == 2 and key not in (\'-n\', \'-J\', \'-V\')}\n    for position in range(index + (0 if command.startswith(\'-\') else 1), len(args)):\n        token = args[position]\n        if token == \'--\':\n            break\n        option, separator, value = token.partition(\'=\')\n        if option in aliases:\n            args[position] = aliases[option] + (separator + value if separator else \'\')\n        elif option not in existing and token[:2] in attached:\n            args[position] = attached[token[:2]] + \'=\' + token[2:]\n    return args\n'
+CLI_ALIASES_SOURCE = '"""Explicit CLI aliases, also embedded in the dependency-free launcher."""\n\n\nCOMMAND_ALIASES = {\n    \'bootstrap\': (\'init\',), \'list\': (\'ls\',), \'status\': (\'st\',),\n    \'update\': (\'up\',), \'switch\': (\'use\',), \'project\': (\'proj\',),\n    \'submit\': (\'sub\',), \'capabilities\': (\'caps\',), \'version\': (\'ver\',),\n    \'rerun\': (\'rr\',), \'recover\': (\'rc\',), \'report\': (\'rpt\',),\n    \'storage\': (\'disk\',), \'install\': (\'inst\',), \'versions\': (\'vers\',),\n    \'bundle\': (\'pack\',),\n}\n\nOPTION_ALIASES = {\n    \'--version\': (\'-V\',), \'--json\': (\'-J\',), \'--project\': (\'-p\',),\n    \'--name\': (\'-N\',), \'--verification-root\': (\'-vr\',),\n    \'--rtl-root\': (\'-rtl\',), \'--rtl-filelist\': (\'-rf\',),\n    \'--verification-filelist\': (\'-vf\',), \'--nsim-version\': (\'-nv\',),\n    \'--output-root\': (\'-o\',), \'--case\': (\'-c\',), \'--submit\': (\'-s\',),\n    \'--seed\': (\'-S\',), \'-mode\': (\'-m\', \'--mode\'),\n    \'-dir\': (\'-d\', \'--dir\'), \'-com-dir\': (\'-cd\', \'--com-dir\'),\n    \'-sim-dir\': (\'-sd\', \'--sim-dir\'), \'-repeat\': (\'-r\', \'--repeat\'),\n    \'--jobs\': (\'-j\', \'-jobs\'), \'--retries\': (\'-retry\',),\n    \'--retry-seconds\': (\'-rt\',), \'--min-free-bytes\': (\'-fb\',),\n    \'--min-free-inodes\': (\'-fi\',), \'--dry-run\': (\'-n\',),\n    \'--scheduler\': (\'-sched\',), \'--resource\': (\'-R\',),\n    \'--license\': (\'-lic\',), \'--extends\': (\'-e\',),\n    \'--plusargs\': (\'-pa\',),\n    \'--bundle\': (\'-b\',), \'--wheel\': (\'-w\',), \'--wheelhouse\': (\'-wh\',),\n    \'--checksums\': (\'-sum\',), \'--sha256\': (\'-sha\',), \'--all\': (\'-a\',),\n    \'--user\': (\'-u\',), \'--system\': (\'-sys\',), \'--output\': (\'-o\',),\n    \'--download-deps\': (\'-deps\',), \'--platform\': (\'-plat\',),\n    \'--python-version\': (\'-py\',), \'--implementation\': (\'-impl\',),\n}\n\n\ndef add_argument(parser, *names, **kwargs):\n    """Keep aliases on the original action, including mutually exclusive groups."""\n    expanded = list(names)\n    for name in names:\n        for alias in OPTION_ALIASES.get(name, ()):\n            if alias not in expanded:\n                expanded.append(alias)\n    return parser.add_argument(*expanded, **kwargs)\n\n\ndef add_command(commands, name, **kwargs):\n    parser = commands.add_parser(name, aliases=COMMAND_ALIASES.get(name, ()), **kwargs)\n    parser.set_defaults(**{commands.dest: name})\n    return parser\n\n\ndef canonical_command(name):\n    return next((command for command, aliases in COMMAND_ALIASES.items() if name in aliases), name)\n\n\ndef runtime_arguments(argv):\n    """Expand runtime aliases before selecting/launching an installed wheel.\n\n    Only command positions and option spellings change. Values after \'=\' and\n    positional values (including names such as \'init\') remain untouched.\n    """\n    args = list(argv)\n    index = 0\n    while index < len(args):\n        token = args[index]\n        if token in (\'-o\', \'--output-root\'):\n            index += 2\n        elif token.startswith((\'-o=\', \'--output-root=\')) or (token.startswith(\'-o\') and not token.startswith(\'--\')):\n            index += 1\n        else:\n            break\n    if index >= len(args):\n        return args\n    command = args[index] = canonical_command(args[index])\n    if command == \'project\' and index + 1 < len(args) and args[index + 1] == \'ls\':\n        args[index + 1] = \'list\'\n\n    # Installer options are handled by its own parser. Preserve existing -o/-j\n    # spellings except in commands which have only just gained those aliases.\n    aliases = {alias: option for option, values in OPTION_ALIASES.items()\n               for alias in values if option not in (\n                   \'--bundle\', \'--wheel\', \'--wheelhouse\', \'--checksums\', \'--sha256\',\n                   \'--all\', \'--user\', \'--system\', \'--output\', \'--download-deps\',\n                   \'--platform\', \'--python-version\', \'--implementation\')}\n    if command not in (\'bootstrap\', \'update\'):\n        aliases.pop(\'-o\', None)\n    if command not in (\'rerun\', \'recover\'):\n        aliases.pop(\'-j\', None)\n        aliases.pop(\'-jobs\', None)\n    existing = set(OPTION_ALIASES) | set(aliases) | {\n        \'-sub\', \'-seed\', \'-scheduler\', \'-queue\', \'-q\', \'-l\', \'-jobs\', \'-j\',\n        \'-o\', \'-h\', \'--help\', \'--caselist\', \'--queue\', \'-rl\', \'--regr-list\', \'-rebuild\', \'--rebuild\',\n    }\n    attached = {key: value for key, value in aliases.items()\n                if len(key) == 2 and key not in (\'-n\', \'-J\', \'-V\')}\n    for position in range(index + (0 if command.startswith(\'-\') else 1), len(args)):\n        token = args[position]\n        if token == \'--\':\n            break\n        option, separator, value = token.partition(\'=\')\n        if option in aliases:\n            args[position] = aliases[option] + (separator + value if separator else \'\')\n        elif option not in existing and token[:2] in attached:\n            args[position] = attached[token[:2]] + \'=\' + token[2:]\n    return args\n'
 _cli_aliases = {}
 exec(CLI_ALIASES_SOURCE, _cli_aliases)
 
@@ -400,6 +400,25 @@ def plan_from_journal(path):
     directory = Path(path).resolve()
     if (directory / 'report' / 'plan.json').is_file():
         directory = directory / 'report'
+    if not (directory / 'plan.json').exists() and (directory / 'build.json').is_file():
+        build = json.loads((directory / 'build.json').read_text(encoding='utf-8'))
+        if not isinstance(build, dict):
+            raise InstallError(f'invalid compile record: {directory}')
+        recorded = build.get('record_dir')
+        if recorded is not None and (not isinstance(recorded, str) or not Path(recorded).is_absolute()):
+            raise InstallError(f'invalid compile record directory: {directory}')
+        if recorded and Path(recorded).resolve() != directory:
+            directory = Path(recorded).resolve()
+        elif not recorded:
+            enclosing = next((parent / 'report' for parent in directory.parents
+                              if (parent / 'report' / 'plan.json').is_file()), None)
+            cases = list((directory.parent / 'sim_dir').glob('*/run.json'))
+            if enclosing:
+                directory = enclosing
+            elif len(cases) == 1:
+                directory = cases[0].parent
+            else:
+                raise InstallError('cannot locate the compile source; use its case directory with rerun --rebuild')
     if not (directory / 'plan.json').exists() and (directory / 'run.json').is_file():
         reference = json.loads((directory / 'run.json').read_text(encoding='utf-8'))
         if isinstance(reference, dict) and reference.get('schema_version') == 2 and 'plan' in reference:
@@ -415,8 +434,23 @@ def plan_from_journal(path):
     return plan
 
 
-def version_from_journal(path, current=False):
+def version_from_journal(path, current=False, single_current=False):
     plan = plan_from_journal(path)
+    if plan.get('kind') == 'batch':
+        versions = set()
+        for entry in plan['entries']:
+            version = entry['plan']['runtime']['version']
+            if current:
+                version = read_pin(entry['plan']['project']['root']) or version
+            versions.add(valid_version(version))
+        if len(versions) != 1:
+            raise InstallError('batch projects select different NSIM versions; align their pins or replay children separately')
+        return valid_version(versions.pop())
+    if single_current:
+        directory = Path(path).resolve()
+        current = (plan.get('kind') == 'case' or (plan.get('source') or {}).get('scope') == 'case'
+                   or plan.get('execution', {}).get('phase') == 'com'
+                   or (directory / 'run.json').is_file() or (directory / 'build.json').is_file())
     if current:
         pin = read_pin(plan['project']['root'])
         if pin:
@@ -442,6 +476,8 @@ def selected_version(args, root):
         selector.add_argument('source', nargs='?')
         selector.add_argument('-h', '--help', action='store_true')
         if replay:
+            selector.add_argument('--rebuild', '-rebuild', action='store_true')
+            selector.add_argument('-dir', '--dir')
             selector.add_argument('-o', '--output-root', action='append')
             selector.add_argument('-seed', '--seed')
             selector.add_argument('-j', '-jobs', '--jobs')
@@ -452,7 +488,8 @@ def selected_version(args, root):
             selector.add_argument('--rebuild', action='store_true')
         options, _ = selector.parse_known_args(args[1:])
         if options.source is not None:
-            return version_from_journal(options.source, current=args[0] == 'rerun')
+            return version_from_journal(options.source, current=args[0] == 'rerun',
+                                        single_current=args[0] == 'recover')
     project_arg = None
     for index, item in enumerate(args):
         if item == '--':

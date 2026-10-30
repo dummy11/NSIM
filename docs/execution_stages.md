@@ -111,7 +111,7 @@ submit 的参数可被清单默认值及当前行覆盖，显式 YAML 用例覆�
 清单及 YAML 原文、哈希、解析定义与最终运行参数都保存到计划。
 bootstrap 生成 8 份清单示例，完整规则见 [Caselist 语法](caselist.md)。
 
-`-repeat N` 表示生成 N 个不同随机 seed，并将这一组 seed 应用于所有 case/submit，不表示重复覆盖同一个 seed。它必须是正整数，不能和 -seed 同时使用；随机数在规划时生成一次，保存在 seed_selection.values 和各任务中。例如 3 个 case × 2 个 submit × repeat 5 = 30 个仿真任务。任务可按 --jobs 并发，不会因 repeat 写入同一个 case_seed 目录。rerun 固定失败任务记录的 seed，不重新抽样，也不接受 seed 覆盖；recover 默认复用历史 seed，仍可显式覆盖。
+`-repeat N` 表示生成 N 个不同随机 seed，并将这一组 seed 应用于所有 case/submit，不表示重复覆盖同一个 seed。它必须是正整数，不能和 -seed 同时使用；随机数在规划时生成一次，保存在 seed_selection.values 和各任务中。例如 3 个 case × 2 个 submit × repeat 5 = 30 个仿真任务。任务可按 --jobs 并发，不会因 repeat 写入同一个 case_seed 目录。rerun 固定失败任务记录的 seed，不重新抽样，也不接受 seed 覆盖；整轮 recover 默认复用历史 seed，仍可显式覆盖；单跑 recover 与 rerun 一样不接受 seed 或输出根覆盖。
 
 `-o` 支持放在子命令前或后，例如 `nsim -o /scratch/out regr ...` 和 `nsim regr -o /scratch/out ...`。两处同时指定时，子命令后的值覆盖前面的值；本次执行只选择一个输出根，不会自动切换备用根。它只影响本次运行，持久修改项目默认位置使用 `nsim update --output-root`。固定的绝对 -com-dir/-sim-dir 不会随 -o 改变。
 
@@ -160,7 +160,7 @@ submit 可增加 `compile` 对象：
 
 没有归属记录的非空旧目录会被拒绝自动接管，应选择新输出根或工作区后重新编译。已有历史报告仍可读取。此保护需要运行版本支持该协议；旧版 nsim 不认识归属记录，因此与旧版并行时必须使用互不包含的独立输出目录。共享文件系统还必须支持各客户端之间一致的 `flock` 与原子替换；本地测试不证明真实 NFS/LSF 集群满足这些条件。
 
-默认工具安装及项目注册表分别在各用户的 `~/.local/share/nsim` 与 `~/.config/nsim` 下。`NSIM_HOME`、`XDG_CONFIG_HOME` 可以覆盖这些位置，不应无意中指向其他用户的可写目录。同一项目检出的 `.nsim/.nsim_version` 是共享设置，`nsim switch` 会影响该检出后续调用的版本选择；若不同用户需要独立切换，应使用各自检出。已生成计划保留原运行时和输入；report/recover 选择历史版本，rerun 选择来源工程当前版本 pin（无 pin 时使用历史版本）。
+默认工具安装及项目注册表分别在各用户的 `~/.local/share/nsim` 与 `~/.config/nsim` 下。`NSIM_HOME`、`XDG_CONFIG_HOME` 可以覆盖这些位置，不应无意中指向其他用户的可写目录。同一项目检出的 `.nsim/.nsim_version` 是共享设置，`nsim switch` 会影响该检出后续调用的版本选择；若不同用户需要独立切换，应使用各自检出。已生成计划保留原运行时和输入；report 和整轮 recover 选择历史版本，rerun 与单跑 recover 选择来源工程当前版本 pin（无 pin 时使用历史版本）。
 
 项目配置更新期间还会写入项目内的事务标记。若更新进程异常退出，使用其他个人注册表的用户也会被阻止读取或修改半完成配置；原更新用户需使用原注册表重新执行 bootstrap/update 完成恢复。不要手动删除活动事务标记。
 
@@ -168,6 +168,8 @@ submit 可增加 `compile` 对象：
 
 稳定启动器使用隔离的 Python 启动并清除继承的 Python 搜索路径配置。内置本地 worker 和 LSF worker 绑定控制器的代码路径，避免当前目录或其他项目的 `PYTHONPATH` 替换 nsim。用户配置的编译器、仿真器和 hook 仍使用 submit 声明的环境。
 
-`report`、`rerun`、`recover` 使用返回的 `record_dir`，不需要 event-root。`rerun` 固定完整执行但结果失败的 case/seed，重新读取当前工程登记、源码、submit、caselist/YAML 与输入文件，不要求它们匹配历史 hash。每次在来源回归下建立独立 `rerun_<时间_UUID>/report/`、编译和仿真目录；每个 submit 强制编译一次，再运行对应失败 case，包括原先由 sim 产生的任务。原产物与报告保留，详见 [重跑、恢复与报告](replay_reports.md)。`recover` 校验历史输入，在新的独立目录强制编译、仿真和检查；来源为 sim 时也不复用原编译产物。纯 com 来源没有仿真 case，不能 recover 为完整仿真。
+单 case 的 `rerun CASE_DIR` 与 `recover CASE_DIR` 完全等价，默认校验复用编译，显式 `--rebuild` 才重新编译；`rerun COM_DIR` 与 `recover COM_DIR` 都只重新编译。case_dir 是 sim_dir 下的具体 case 目录，sim_dir 父目录不作此入口。原产物保留，新结果使用独立目录；两者都读取当前输入；下文区分 rerun/recover 的规则适用于整轮回归，批量回归也支持按记录逐行重跑。详见 [按目录重跑](rerun.md)。
+
+`report`、`rerun`、`recover` 使用返回的 `record_dir`，不需要 event-root。`rerun` 固定完整执行但结果失败的 case/seed，重新读取当前工程登记、源码、submit、caselist/YAML 与输入文件，不要求它们匹配历史 hash。每次在来源回归下建立独立 `rerun_<时间_UUID>/report/`、编译和仿真目录；每个 submit 强制编译一次，再运行对应失败 case，包括原先由 sim 产生的任务。原产物与报告保留，详见 [重跑、恢复与报告](replay_reports.md)。`recover` 校验历史输入，在新的独立目录强制编译、仿真和检查；来源为 sim 时也不复用原编译产物。com_dir 来源只重新编译，不执行仿真。
 
 `--dry-run` 只写独立预览记录，不写编译成功记录，不清理编译或仿真产物。com 预览仅含编译；sim 预览仅含仿真；run/regr 包含两阶段。预览成功不代表所引用编译产物存在或真实 EDA/farm 作业可运行。

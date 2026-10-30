@@ -6,6 +6,10 @@
 选择后续动作。正常完成且通过的回归，查看报告即可；local 执行无需 LSF 占用处理。
 下文的编译流程以包含 `compile` 步骤的 command submit 为例。
 
+单 case 调试的 `rerun CASE_DIR` 与 `recover CASE_DIR` 完全等价，默认不重新编译；修改 TB 等编译输入后加 `--rebuild`。
+CASE_DIR 是 sim_dir 下的具体 case 目录，不是 sim_dir 父目录。传 com_dir 则只重新编译。
+下文按失败类型选择和强制编译的 rerun 流程针对整轮回归；[目录入口规则](rerun.md) 单独说明。
+
 ## 1. 先确认“结束”是哪一种状态
 
 终端命令退出、LSF job 结束、回归形成可信完成记录、case 通过，是不同的状态。
@@ -31,8 +35,7 @@ nsim report "$REGR" --json
 ```
 
 `SOURCE` 通常可使用回归根或运行返回的 `record_dir`（回归的 `report/`）。
-使用 `regr -rl` 时，先从批次报告选中一轮具体回归；不要把
-`regr_batch_dir/<批次>` 总目录交给 inspect、release、rerun 或 recover。
+使用 `regr -rl` 时，rerun/recover 可以直接接收 `regr_batch_dir/<批次>` 总目录，按保存的子回归逐行处理；inspect/release 仍需先选一轮具体回归。
 
 ## 2. 四个命令的分工与整体流程
 
@@ -159,8 +162,8 @@ rerun 只选 `FAIL/NO_COMPARE`；recover 排除
 nsim rerun "$REGR" --jobs 4 -dir rerun_fix_1
 nsim report "$REGR/rerun_fix_1"
 
-# 仅重跑一个符合条件的 case/seed
-nsim rerun "$REGR/base/rtl/sim_dir/smoke_42" --jobs 1
+# 修改输入后只重跑指定 case/seed，并显式重新编译
+nsim rerun "$REGR/base/rtl/sim_dir/smoke_42" --jobs 1 --rebuild
 
 # 仅选择上次 rerun 中仍符合条件的失败
 nsim rerun "$REGR/rerun_fix_1" --jobs 4 -dir rerun_fix_2

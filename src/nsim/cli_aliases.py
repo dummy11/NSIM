@@ -89,7 +89,7 @@ def runtime_arguments(argv):
         aliases.pop('-jobs', None)
     existing = set(OPTION_ALIASES) | set(aliases) | {
         '-sub', '-seed', '-scheduler', '-queue', '-q', '-l', '-jobs', '-j',
-        '-o', '-h', '--help', '--caselist', '--queue', '-rl', '--regr-list',
+        '-o', '-h', '--help', '--caselist', '--queue', '-rl', '--regr-list', '-rebuild', '--rebuild',
     }
     attached = {key: value for key, value in aliases.items()
                 if len(key) == 2 and key not in ('-n', '-J', '-V')}

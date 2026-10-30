@@ -85,6 +85,9 @@ class LsfTests(LsfFixture):
 
     def test_default_lsf_completion_hook_refills_global_window_and_queue(self):
         self.cases.write_text('slow\nfast\nthird\nfourth\nfifth\n')
+        self.data['fake']['durations']['slow'] = 0
+        self.save_submit()
+        self.configure(terminal_requires_cases={'slow_42': 3})
         plan = self.plan(scheduler_overrides={'queue': 'override'})
         self.assertEqual(plan['submits'][0]['scheduler']['kind'], 'lsf')
         snapshots = []

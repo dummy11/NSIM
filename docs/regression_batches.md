@@ -110,9 +110,11 @@ rerun、recover 在来源回归下分别新建 `rerun_<时间_UUID>/`、`recover
 
 `record_dir` 返回 report 子目录。`report`、`rerun`、`recover` 均可接受回归根或 report 子目录；
 也可从 case 仿真目录通过 run.json 找到对应记录。回归失败重跑在来源回归下新建独立目录与 report，固定原始
-case、seed、submit 选择，读取当前配置并强制编译，不改写原回归及批次结论。批次重跑需先从批次报告选择具体回归。
+case、seed、submit 选择，读取当前配置并强制编译，不改写原回归及批次结论。也可直接对批次根或其 report/ 执行 rerun/recover，按保存的子回归逐行选择并生成独立批次总览。
 现有 recover 仍针对已发布终态的存储/证据失败，不支持自动接续被中断的批次或状态未知的 LSF 作业。
 同一次回归使用一个明确选定的输出根；case 执行错误只记录该 case 的实际问题，不触发自动切根。历史上使用多个输出根的记录仍可读取；recover 可为恢复回归选择其他根；rerun 固定在来源回归所在根。
+
+直接传 case_dir（sim_dir 下的具体 case 目录）时，rerun/recover 等价，都读取当前输入且不按判定筛选，默认校验并复制来源编译产物；显式 `--rebuild` 才重新编译。传 com_dir 时只重新编译。以上整轮回归的失败筛选和强制编译规则保持不变，详见 [按目录重跑](rerun.md)。
 
 ## 控制器、Dashboard 与统计
 

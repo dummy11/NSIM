@@ -105,7 +105,9 @@ submit 可独立定义，也可用 `extends` 继承一个公共 JSON；合并后
 
 命令启动、日志写入、结果读取等错误按 case 记录原始阶段、错误码、路径及缺失证据；NSIM 不凭单次错误推断整块磁盘故障，也不隔离或切换输出根。后续 case 仍按原配置各自尝试执行。一个回归 case 的 `run.json` 写失败时，该 case 不能通过；若回归报告目录的 `state.json` 仍可保存该错误，其他 case 继续。`state.json` 在派发与每个 case 完成时持久更新；若整批状态无法保存，则停止新派发，不发布成功终态。单跑的 `run.json` 是其唯一控制记录，最终写入仍失败时不能发布完成结果。`--retries` 和 `--retry-seconds` 仅保留兼容入口，必须为 0；需要换根或再次执行时显式使用 rerun/recover。线程负责等待与协调，仿真本身由独立子进程执行。
 
-`rerun` / `recover` 读取校验通过的终态控制记录，生成新运行、attempt 和 parent 引用。rerun 固定完整执行但结果失败的 case/seed，重新规划当前输入并强制编译，结果存入来源回归下独立的 rerun_<时间_UUID>/，原产物保留。recover 使用可验证的历史输入，在独立 recover_<时间_UUID>/ 下强制重新编译、仿真和检查未完成任务，包括来源为 sim 的任务；纯 com 来源没有仿真 case，不能 recover 为完整仿真。每次 attempt 启动前后仍校验本次输入 hash，执行期间变化时不宣布通过。dry-run 不写编译完成记录，也不清理已有结果。
+单 case 的 `rerun CASE_DIR` 与 `recover CASE_DIR` 完全等价，默认校验复用编译，显式 `--rebuild` 才重新编译；`rerun COM_DIR` 与 `recover COM_DIR` 都只重新编译。case_dir 是 sim_dir 下的具体 case 目录，sim_dir 父目录不作此入口。原产物保留，新结果使用独立目录；两者都读取当前输入；下文区分 rerun/recover 的规则适用于整轮回归，批量回归也支持按记录逐行重跑。详见 [按目录重跑](rerun.md)。
+
+`rerun` / `recover` 读取校验通过的终态控制记录，生成新运行、attempt 和 parent 引用。rerun 固定完整执行但结果失败的 case/seed，重新规划当前输入并强制编译，结果存入来源回归下独立的 rerun_<时间_UUID>/，原产物保留。recover 使用可验证的历史输入，在独立 recover_<时间_UUID>/ 下强制重新编译、仿真和检查未完成任务，包括来源为 sim 的任务；com_dir 来源只重新编译，不执行仿真。每次 attempt 启动前后仍校验本次输入 hash，执行期间变化时不宣布通过。dry-run 不写编译完成记录，也不清理已有结果。
 
 最终报告发布失败时删除部分发布的人类可读报告，在仍可写的机器记录中保留错误并使整体未通过；若 case 结果与机器记录仍可信，手动 `report --rebuild` 生成独立汇总报告，不重跑 case。完全丢失控制记录、依赖输入、或旧任务没有确定终态时停止自动恢复。
 

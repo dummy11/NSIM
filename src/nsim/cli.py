@@ -82,8 +82,10 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
         add_argument(execute, "--resource", action="append")
         add_argument(execute, "--license", action="append", help="LSF resource=count; CLI replaces submit licenses")
     for action in ("rerun", "recover"):
-        again = add_command(commands, action, help="Recompile current inputs and rerun failed cases with their original seeds" if action == "rerun" else "Recover terminal storage/evidence failures")
-        add_argument(again, "source", type=Path, help="Completed simulation or regression directory")
+        again = add_command(commands, action, help="Rebuild a compile directory, rerun a case, or rebuild regression failures" if action == "rerun" else "Rerun a single case/compile directory, or recover regression evidence failures")
+        add_argument(again, "source", type=Path, help="Completed case, compile, regression, or batch directory")
+        add_argument(again, '--rebuild', '-rebuild', action='store_true',
+                     help='Recompile current case inputs; a case source otherwise reuses its recorded build')
         if action == 'recover':
             add_argument(again, '-o', "--output-root", action="append", type=Path)
             add_argument(again, '-seed', "--seed", type=int)
@@ -210,7 +212,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             journal, state = replay(args.source, roots=getattr(args, 'output_root', None) or args.global_output_root,
                                     recovery=args.command == "recover", seed=getattr(args, 'seed', None), jobs=args.jobs,
                                     retries=args.retries, retry_seconds=args.retry_seconds,
-                                    output_dir=args.output_dir)
+                                    output_dir=args.output_dir, rebuild=getattr(args, 'rebuild', False))
         else:
             parser.print_help()
             return 0

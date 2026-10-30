@@ -12,7 +12,8 @@ import time
 import uuid
 
 from nsim.config import ConfigError, read_json
-from nsim.layout import build_directory, check_environment_link, make_directory, prepare_environment_link, isolated_regression
+from nsim.layout import (build_directory, check_environment_link, make_directory,
+                         prepare_environment_link, isolated_regression, record_directory)
 from nsim.planning import check_identity
 from nsim.ownership import OWNER_FILE, claim_product
 from nsim.lsf import LsfError
@@ -105,6 +106,7 @@ class Builds:
                 manifest['log_analysis']['path'] = str(build / Path(manifest['log_analysis']['path']).relative_to(source))
             manifest['snapshot_source'] = dict(path=str(source), sha256=original_hash,
                                                 scheduler=manifest.pop('scheduler', None))
+            manifest['record_dir'] = str(record_directory(root, self.plan))
             # Revalidate before releasing the source reader lock.
             source_builds.validate(source, task)
             if digest(source / 'build.json') != original_hash:
@@ -207,6 +209,7 @@ class Builds:
         submit = self.plan['submits'][task['submit']]
         argv = compile_command(self.plan, task, build)
         manifest = {'schema_version': 1, 'id': uuid.uuid4().hex, 'build_id': task['build_id'],
+                    'record_dir': str(record_directory(root, self.plan)),
                     'submit': submit['name'], 'mode': submit['mode'], 'adapter': submit['adapter'],
                     'kind': 'command' if argv else 'fake' if submit['adapter'] == 'fake' else 'prebuilt',
                     'ready': False, 'compiled': False, 'artifacts': {}, 'command': argv,

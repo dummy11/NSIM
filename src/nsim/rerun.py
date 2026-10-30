@@ -1,14 +1,16 @@
-"""Plan fixed case/seed failures against current inputs in a private rebuild."""
+"""Replay a selected case, or failed regression pairs, against current inputs."""
 
 from nsim.config import ConfigError
 from nsim.replay_paths import anchor, directory_name
 from nsim.planning import create_plan
 
 
-def prepare_rerun(source, original, state, output_dir=None):
+def prepare_rerun(source, original, state, output_dir=None, rebuild=False):
     if original['execution']['phase'] == 'com':
         raise ConfigError('rerun requires completed case results; use com to retry compilation')
-    selected = [task for task in state['tasks'] if task['effective_verdict'] in ('FAIL', 'NO_COMPARE')]
+    from nsim.single_replay import case_source, reuse_compilation
+    single = case_source(original)
+    selected = [task for task in state['tasks'] if single or task['effective_verdict'] in ('FAIL', 'NO_COMPARE')]
     if not selected:
         return None
     root, anchor_path = anchor(original)
@@ -26,7 +28,7 @@ def prepare_rerun(source, original, state, output_dir=None):
         phase='run', directory=original['execution'].get('workspace'),
         plusargs=original.get('plusargs', ()), task_selection=selection)
     for submit in plan['submits']:
-        if submit['adapter'] == 'command' and not submit.get('compile'):
+        if (rebuild or not single) and submit['adapter'] == 'command' and not submit.get('compile'):
             raise ConfigError(f'rerun requires a compile step for submit {submit["name"]}; prebuilt-only inputs cannot be rebuilt')
     # A case reference inside a regression still belongs to that regression.
     # A standalone case uses its workspace, outside the owned case directory.
@@ -38,11 +40,16 @@ def prepare_rerun(source, original, state, output_dir=None):
     plan['seed_selection'].update(source='rerun', repeat=None)
     plan['source'] = {'journal': str(source), 'id': original['id'], 'mode': 'rerun',
                       'root_id': (original.get('source') or {}).get('root_id', original['id'])}
+    if single:
+        plan['source']['scope'] = 'case'
+        if not rebuild:
+            reuse_compilation(plan, selected[0], root)
     batch = original.get('batch', original.get('source_batch'))
     if batch:
         plan['source_batch'] = batch
     parents = {(original['submits'][t['submit']]['name'], t['case'], t['seed']): t for t in selected}
     for task in plan['tasks']:
         prior = parents[(plan['submits'][task['submit']]['name'], task['case'], task['seed'])]
-        task['parent'] = {'run': original['id'], 'task': prior['id'], 'attempt': prior['attempts'][-1]['id']}
+        task['parent'] = {'run': original['id'], 'task': prior['id'],
+                          'attempt': prior['attempts'][-1]['id'] if prior['attempts'] else None}
     return plan, [root]

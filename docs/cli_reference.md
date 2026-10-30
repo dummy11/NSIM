@@ -22,8 +22,8 @@
 | `nsim sim` | 使用已有编译产物仿真并检查结果 | 无 |
 | `nsim run` | 编译、仿真及结果检查 | 无 |
 | `nsim regr` | 按用例清单批量编译、仿真及汇总 | 无 |
-| `nsim rerun SOURCE` | 固定失败 case/seed，使用当前输入强制重编译并完整重跑 | `SOURCE` 必填 |
-| `nsim recover SOURCE` | 恢复存储或证据失败的任务 | `SOURCE` 必填 |
+| `nsim rerun SOURCE` | com_dir 只重编译；case_dir 默认复用编译；整轮回归重编译失败任务 | `SOURCE` 必填 |
+| `nsim recover SOURCE` | 单跑与 rerun 等价；整轮或批量回归恢复历史输入任务 | `SOURCE` 必填 |
 | `nsim report SOURCE` | 查看单 case 结果或校验回归 HTML，可重建展示页面 | `SOURCE` 必填 |
 | `nsim storage check ROOT` | 检查已有输出目录的空间及读写能力 | `ROOT` 必填 |
 | `nsim version` | 显示当前工具版本 | 无 |
@@ -232,12 +232,16 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 
 | 命令 | 全部选项 | 默认行为 |
 | --- | --- | --- |
-| `rerun SOURCE` | `-dir / --dir NAME`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | 完整执行但结果失败的任务；在来源回归下新建独立目录并使用当前输入强制编译 |
-| `recover SOURCE` | `-dir / --dir NAME`、`-o / --output-root PATH`、`-seed / --seed N`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | 不完整任务；在新目录使用历史输入与版本强制编译、仿真和检查 |
+| `rerun SOURCE` | `--rebuild / -rebuild`、`-dir / --dir NAME`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | com_dir 只重编译；case_dir 默认复用，加 --rebuild 才重编译；整轮回归重编译失败任务 |
+| `recover SOURCE` | `--rebuild / -rebuild`、`-dir / --dir NAME`、`-o / --output-root PATH`、`-seed / --seed N`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | 单跑与 rerun 等价；单次/批量回归恢复不完整任务，使用历史输入重编译 |
 | `report SOURCE` | `--json`、`--rebuild`、`-dir / --dir NAME`、`--include PATH` | 手动 rebuild 时汇总原回归与最新一次 rerun、recover，生成新报告目录；`--include` 指定有歧义或其他输出根的目录 |
 | `storage check ROOT` | `--min-free-bytes N`、`--min-free-inodes N` | 两个阈值均默认 0；输出 JSON |
 
-`rerun` 不接受 `-seed/--seed/-S` 或 `-o/--output-root`（包括子命令前的全局选项）。`recover` 保留输出根和单个 seed 覆盖入口。两者的并发选项支持 `-j / -jobs / --jobs`，不接受 `--project`、`--dry-run`、`-sub`、`-l`、`-repeat` 或队列覆盖。rerun 使用来源工程的当前输入、submit 配置与版本 pin；recover 使用历史输入与版本。两者均强制重新编译、仿真和检查；没有 compile 步骤的 command submit 会报错，纯 com 来源不能 recover 为完整仿真。`-dir` 精确指定新目录名，已存在则报错；自动目录名重名会重新生成。详见 [重跑、恢复与报告](replay_reports.md)。
+`rerun` 不接受 `-seed/--seed/-S` 或 `-o/--output-root`（包括子命令前的全局选项）。整轮/批量 `recover` 保留输出根和单个 seed 覆盖入口；单跑时与 rerun 一样拒绝这两个覆盖。两者的并发选项支持 `-j / -jobs / --jobs`，不接受 `--project`、`--dry-run`、`-sub`、`-l`、`-repeat` 或队列覆盖。rerun 和单跑 recover 使用来源工程的当前输入、submit 配置与版本 pin；整轮 recover 使用历史输入与版本。整轮回归 rerun 和 recover 强制重新编译、仿真和检查；case_dir 的 rerun/recover 默认校验复用原编译，只有 --rebuild 才重编译，com_dir 的 rerun/recover 则只编译。需要重编译时，没有 compile 步骤的 command submit 会报错；com_dir 来源只重新编译。`-dir` 精确指定新目录名，已存在则报错；自动目录名重名会重新生成。详见 [重跑、恢复与报告](replay_reports.md)。
+
+`case_dir` 是 `sim_dir/<case>_<seed>`；`sim_dir` 父目录不作为单 case 入口。单 case rerun/recover 不按原判定过滤，复用失败时提示 --rebuild，不自动编译；新结果和编译快照使用独立目录。`rerun/recover --rebuild` 执行编译，`report --rebuild` 仅生成报告。
+
+`rerun/recover` 也接受 regr_batch_dir 下的批次根或 report/，先规划全部选中子回归，再按行顺序执行并生成独立批次总览；无匹配行记录为跳过，原结果保持不变。
 
 `storage check` 会在目录内创建临时探测文件，完成读写与 fsync 后删除。`recover` 重新执行相关任务，不是仿真断点续跑。
 

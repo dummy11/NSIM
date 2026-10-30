@@ -31,6 +31,8 @@ def _choose(source_root, root_id, includes):
     explicit = {}
     for path in includes:
         item = _load_candidate(path, root_id)
+        if item[2]['execution']['phase'] == 'com':
+            raise ConfigError('compile-only reruns cannot replace simulation results in a summary')
         if item[0] in explicit and explicit[item[0]][1] != item[1]:
             raise ConfigError(f'--include accepts one {item[0]} directory for this summary')
         explicit[item[0]] = item
@@ -50,7 +52,8 @@ def _choose(source_root, root_id, includes):
             if child.name.split('_', 1)[0] not in explicit:
                 raise ConfigError(f'cannot identify replay directory {child}: {exc}; use --include') from exc
             continue
-        found[item[0]].append(item)
+        if item[2]['execution']['phase'] != 'com':
+            found[item[0]].append(item)
     chosen = {}
     for mode in ('rerun', 'recover'):
         if mode in explicit:

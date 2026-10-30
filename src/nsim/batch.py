@@ -25,6 +25,10 @@ class RowParser(argparse.ArgumentParser):
         raise ConfigError(message or 'help/version is not an executable regression row')
 
 
+class BatchDirectoryExists(FileExistsError):
+    """The batch directory was already claimed; no child has been started."""
+
+
 def validate_outer(argv):
     """Reject even explicitly supplied default-valued execution options outside rows."""
     parser = RowParser(add_help=False, allow_abbrev=False)
@@ -108,6 +112,7 @@ def final_totals(child):
 def batch_markdown(state):
     lines = [f"# NSIM batch {state['id']}", '',
              f"State: {state['lifecycle']}; passed: {state['passed']}; tasks: {state['task_count']}", '',
+             state.get('selection_summary', ''), '',
              '| Line | Regression | Status | Passed | Failed | Total | Report |',
              '| --- | --- | --- | --- | --- | --- | --- |']
     for row in state['regressions']:
@@ -145,6 +150,7 @@ def batch_html(state, journal):
             f'<h1>批量回归 {esc(state["id"])}</h1><p>状态：{esc(state["lifecycle"])} · '
             f'回归数：{state.get("regression_count", len(state["regressions"]))} · 仿真任务数：{state["task_count"]} · '
             f'通过：{state["totals"]["passed"]} · 失败：{state["totals"]["failed"]}</p>'
+            f'<p>{esc(state.get("selection_summary", ""))}</p>'
             '<p>此页面由控制器在状态变化时保存；运行期间重新打开或刷新可读取最新快照。</p>'
             f'<p>{esc(state.get("message", ""))}</p><table><thead><tr>' +
             ''.join(f'<th>{title}</th>' for title in ('行', '回归 ID', '状态', '通过', '失败', '运行',
@@ -162,9 +168,16 @@ def run_batch(batch, entries):
         raise ConfigError('select exactly one output root for a regression batch')
     selected = roots[0]
     preflight(selected, entries[0]['settings']['min_free_bytes'], entries[0]['settings']['min_free_inodes'])
-    base = selected / 'regr_batch_dir' / batch['id']
+    if batch.get('execution', {}).get('replay_parent') is not None:
+        from nsim.layout import regression_directory
+        base = regression_directory(selected, batch)
+    else:
+        base = selected / 'regr_batch_dir' / batch['id']
     make_directory(base.parent, selected)
-    base.mkdir(exist_ok=False)
+    try:
+        base.mkdir(exist_ok=False)
+    except FileExistsError as exc:
+        raise BatchDirectoryExists(f'batch directory already exists: {base}') from exc
     journal = base / 'report'
     journal.mkdir()
     write_json(journal / 'plan.json', batch)
@@ -172,6 +185,10 @@ def run_batch(batch, entries):
                  lifecycle='running', started_at=time.time(), ended_at=None, revision=0,
                  dry_run=all(e['settings']['dry_run'] for e in entries), report_errors=[],
                  scheduler_errors=[], regressions=[])
+    if batch.get('source'):
+        state.update(source=batch['source'], skipped=batch.get('skipped', []),
+                     selection_summary=f'本次重跑 {len(entries)} 轮回归；'
+                     f'{len(batch.get("skipped", []))} 轮无匹配任务未执行。仅统计本次选择，原批次结论保留。')
     for entry in entries:
         total = len(entry['plan']['tasks'])
         state['regressions'].append(dict(index=entry['index'], line=entry['line'], argv=entry['argv'],
@@ -223,6 +240,8 @@ def run_batch(batch, entries):
                          'revision', 'published_at', 'totals', 'regression_counts', 'task_count')}
                 brief.update(schema_version=2, regression_count=len(state['regressions']),
                              regressions=[dict(current)], partial=True)
+                if state.get('selection_summary'):
+                    brief['selection_summary'] = state['selection_summary']
                 display(brief)
 
             record, child = run(entry['plan'], entry['roots'], **entry['settings'], on_progress=progress)

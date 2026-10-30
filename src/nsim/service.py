@@ -368,31 +368,48 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
                 dashboard.close()
 
 
-def replay(source, roots=None, recovery=False, seed=None, output_dir=None, **overrides):
+def replay(source, roots=None, recovery=False, seed=None, output_dir=None, rebuild=False, **overrides):
     source = Path(source).resolve()
-    original, state = load_final(source)
+    from nsim.compile_replay import load_compile_source
+    compile_source = (source / 'build.json').is_file()
+    original, state = load_compile_source(source) if compile_source else load_final(source)
     if original.get('kind') == 'batch':
-        raise ConfigError('choose an individual regression from the batch report for rerun/recover')
-    if not recovery:
+        from nsim.batch_replay import replay_batch
+        return replay_batch(source, original, state, roots=roots, recovery=recovery, seed=seed,
+                            output_dir=output_dir, rebuild=rebuild, **overrides)
+    prepared = prepare_replay(source, original, state, roots, recovery, seed, output_dir, rebuild, **overrides)
+    if prepared is None:
+        return None, {'passed': state['passed'], 'message': 'no matching failed tasks', 'tasks': []}
+    plan, roots, settings = prepared
+    return _run_replay(plan, roots, settings, output_dir)
+
+
+def prepare_replay(source, original, state, roots=None, recovery=False, seed=None,
+                   output_dir=None, rebuild=False, **overrides):
+    """Prepare without executing so a batch can validate every child first."""
+    from nsim.compile_replay import prepare_compile_rerun
+    from nsim.single_replay import case_source
+    compile_source = (Path(source) / 'build.json').is_file()
+    if not recovery or compile_source or case_source(original) or original['execution']['phase'] == 'com':
         from nsim.rerun import prepare_rerun
         if seed is not None or roots is not None:
             raise ConfigError('rerun preserves case/seed and the original output root; overrides are not supported')
-        prepared = prepare_rerun(source, original, state, output_dir=output_dir)
+        prepared = (prepare_compile_rerun(source, original, state, output_dir)
+                    if compile_source or original['execution']['phase'] == 'com' else
+                    prepare_rerun(source, original, state, output_dir=output_dir, rebuild=rebuild))
         if prepared is None:
-            return None, {'passed': state['passed'], 'message': 'no matching failed tasks', 'tasks': []}
+            return None
         plan, roots = prepared
         policy = original['policy']
         settings = {key: policy[key] for key in ('jobs', 'min_free_bytes', 'min_free_inodes')}
         settings.update(retries=0, retry_seconds=0)
         settings.update({key: value for key, value in overrides.items() if value is not None})
-        return _run_replay(plan, roots, settings, output_dir)
-    if original['execution']['phase'] == 'com':
-        raise ConfigError('recover requires simulation cases; use run or regr after a compile-only failure')
+        return plan, roots, settings
     check_identity(original)
     selected = [task for task in state['tasks'] if task['effective_verdict'] not in
                 ACCEPTED | {'FAIL', 'NO_COMPARE', 'INPUT_CHANGED'}]
     if not selected:
-        return None, {"passed": state["passed"], "message": "no matching failed tasks", "tasks": []}
+        return None
     for index in {task['submit'] for task in selected}:
         submit = original['submits'][index]
         if submit['adapter'] == 'command' and not submit.get('compile'):
@@ -438,7 +455,7 @@ def replay(source, roots=None, recovery=False, seed=None, output_dir=None, **ove
     # explicit new run and must use the current no-failover contract.
     settings.update(retries=0, retry_seconds=0)
     settings.update({k: v for k, v in overrides.items() if v is not None})
-    return _run_replay(plan, roots or policy['output_roots'], settings, output_dir)
+    return plan, roots or policy['output_roots'], settings
 
 
 def _run_replay(plan, roots, settings, output_dir):

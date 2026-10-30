@@ -1,5 +1,11 @@
 # rerun、recover 与回归汇总报告
 
+单 case 的 `rerun CASE_DIR` 与 `recover CASE_DIR` 完全等价，默认校验复用原编译；加 `--rebuild` 才重新编译。
+`CASE_DIR` 指 `sim_dir/<case>_<seed>`，不接受包含多个 case 的 `sim_dir` 父目录。
+`rerun COM_DIR` 与 `recover COM_DIR` 则始终只重新编译。原产物保留，生成独立新目录；详细规则见
+[按目录重跑](rerun.md)。两者都读取当前输入；下文区分 rerun/recover 的规则适用于单次和批量回归。
+纯编译重跑不参与仿真结果汇总。
+
 ## 职责
 
 `rerun` 处理已完整结束、具有有效结果但检查未通过的任务（当前为 `FAIL`、
@@ -11,7 +17,7 @@
 两者的执行流程都是编译、仿真和检查；区别是选择的任务及输入身份：rerun 使用
 当前输入，recover 使用可验证的历史输入。对没有 `compile` 步骤的 command submit，
 两者都明确报错。fake 适配器会重新生成测试用准备产物，不宣称调用真实编译器。
-纯 `com` 记录没有仿真 case，不能用 recover 生成完整仿真；需要使用 run/regr 发起新运行。
+com_dir 来源只重新编译；需要仿真时传具体 case_dir 或发起新运行。
 两者都不自动调用 `report --rebuild`。
 
 当前两种操作仍要求来源有可校验的终态控制记录。没有终态、旧 LSF 作业状态未明、

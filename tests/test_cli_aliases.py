@@ -76,6 +76,7 @@ class AliasParsingTests(unittest.TestCase):
             self.same([long, '/record', '--jobs', '3', '--retries', '2', '--retry-seconds', '20'],
                       [short, '/record', '-j3', '-retry', '2', '-rt', '20'])
         self.same(['recover', '/record', '--seed', '42'], ['rc', '/record', '-S42'])
+        self.same(['rerun', '/record', '--rebuild'], ['rr', '/record', '-rebuild'])
         self.same(['report', '/record', '--json', '--rebuild'], ['rpt', '/record', '-J', '--rebuild'])
         self.same(['storage', 'check', '/out', '--min-free-bytes', '10', '--min-free-inodes', '2'],
                   ['disk', 'check', '/out', '-fb', '10', '-fi', '2'])

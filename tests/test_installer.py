@@ -172,6 +172,27 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "nsim 0.2.0", result.stderr)
         result = subprocess.run([launcher, "rerun", str(journal)], cwd=self.project, capture_output=True, text=True)
         self.assertEqual(result.stdout.strip(), f"0.2.0 rerun {journal}", result.stderr)
+        for option in ('--rebuild', '-rebuild'):
+            result = subprocess.run([launcher, 'rerun', option, str(journal)], cwd=self.project,
+                                    capture_output=True, text=True)
+            self.assertEqual(result.stdout.strip(), f'0.2.0 rerun {option} {journal}', result.stderr)
+        result = subprocess.run([launcher, 'rerun', '-dir', 'debug', '--rebuild', str(journal)],
+                                cwd=self.project, capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), f'0.2.0 rerun -dir debug --rebuild {journal}', result.stderr)
+        compile_dir = self.base / 'com_dir'
+        compile_dir.mkdir()
+        (compile_dir / 'build.json').write_text(json.dumps({'record_dir': str(journal)}))
+        result = subprocess.run([launcher, 'rerun', str(compile_dir)], cwd=self.project,
+                                capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), f'0.2.0 rerun {compile_dir}', result.stderr)
+        batch = self.base / 'batch'
+        batch.mkdir()
+        child_plan = {'runtime': {'version': '0.1.0'}, 'project': {'root': str(self.project)}}
+        (batch / 'plan.json').write_text(json.dumps({'kind': 'batch', 'entries': [{'plan': child_plan}]}))
+        for command, version in (('rerun', '0.2.0'), ('recover', '0.1.0')):
+            result = subprocess.run([launcher, command, str(batch)], cwd=self.project,
+                                    capture_output=True, text=True)
+            self.assertEqual(result.stdout.strip(), f'{version} {command} {batch}', result.stderr)
         for prefix in (['-o', str(self.base / 'out')], ['--output-root=' + str(self.base / 'out')]):
             result = subprocess.run([launcher, *prefix, 'rerun', str(journal)], cwd=self.project,
                                     capture_output=True, text=True)
@@ -182,14 +203,14 @@ class InstallerTests(unittest.TestCase):
         for command in (['rerun'], ['recover'], ['report']):
             result = subprocess.run([launcher, *command, str(simulation)], cwd=self.project,
                                     capture_output=True, text=True)
-            expected = '0.2.0' if command == ['rerun'] else '0.1.0'
+            expected = '0.2.0' if command in (['rerun'], ['recover']) else '0.1.0'
             self.assertEqual(result.stdout.strip(), f"{expected} {' '.join(command)} {simulation}", result.stderr)
         (simulation / 'run.json').write_text(json.dumps({
             'schema_version': 2, 'plan': {'runtime': {'version': '0.1.0'}, 'project': {'root': str(self.project)}}}))
         for command in (['rerun'], ['recover'], ['report']):
             result = subprocess.run([launcher, *command, str(simulation)], cwd=self.project,
                                     capture_output=True, text=True)
-            expected = '0.2.0' if command == ['rerun'] else '0.1.0'
+            expected = '0.2.0' if command in (['rerun'], ['recover']) else '0.1.0'
             self.assertEqual(result.stdout.strip(), f"{expected} {' '.join(command)} {simulation}", result.stderr)
         (simulation / 'run.json').write_text('{"record_dir": null}')
         result = subprocess.run([launcher, 'rerun', str(simulation)], cwd=self.project,

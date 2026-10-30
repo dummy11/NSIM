@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from test_regression import Fixture
 from nsim.case_records import checksum
+from nsim.config import ConfigError
 from nsim.layout import simulation_directory
 from nsim.planning import create_plan
 from nsim.reports import load_final
@@ -38,7 +39,7 @@ class CaseRecordTests(Fixture):
         self.assertEqual(load_final(record)[0]['id'], state['id'])
         self.assertTrue(load_final(record)[1]['passed'])
 
-    def test_single_failure_rerun_rebuilds_with_fixed_seed(self):
+    def test_single_failure_rerun_reuses_build_with_fixed_seed(self):
         self.data['fake'] = {'outcomes': {'smoke': 'fail'}}
         self.save_submit()
         build_plan = create_plan(self.project, submit_paths=[self.submit], phase='com')
@@ -46,7 +47,7 @@ class CaseRecordTests(Fixture):
         before = digest(build / 'build.json')
         record, old = run(self.one('sim'), [self.out])
         target, new = replay(record)
-        self.assertEqual(new['phase'], 'regr')
+        self.assertEqual(new['phase'], 'sim')
         self.assertEqual(target.name, 'report')
         self.assertEqual(new['tasks'][0]['seed'], 42)
         self.assertEqual(new['tasks'][0]['parent']['run'], old['id'])
@@ -164,12 +165,16 @@ class CaseRecordTests(Fixture):
         with self.assertRaisesRegex(IntegrityError, 'reference does not match'):
             replay(source, recovery=True)
 
-    def test_single_failure_requires_explicit_recovery_root(self):
+    def test_single_failure_without_compile_requires_rebuild_and_preserves_root(self):
         with patch('nsim.runner.preflight', side_effect=OSError(errno.EIO, 'execution failed')):
             record, state = run(self.one(), [self.out])
         self.assertFalse(state['passed'])
         self.assertEqual(len(state['tasks'][0]['attempts']), 1)
-        backup, recovered = replay(record, roots=[self.backup], recovery=True)
+        with self.assertRaisesRegex(ConfigError, 'original output root'):
+            replay(record, roots=[self.backup], recovery=True)
+        with self.assertRaisesRegex(ConfigError, '--rebuild'):
+            replay(record, recovery=True)
+        backup, recovered = replay(record, recovery=True, rebuild=True)
         self.assertTrue(recovered['passed'])
         self.assertTrue(load_final(backup)[1]['passed'])
         self.assertEqual(recovered['tasks'][0]['parent']['attempt'], state['tasks'][0]['attempts'][0]['id'])

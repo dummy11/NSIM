@@ -79,7 +79,7 @@ nsim rc /path/to/record_dir -o /scratch/backup_out
 nsim disk check /scratch/my_project_out
 ```
 
-`sim` 要求已有匹配的编译产物。`rerun` 固定失败 case/seed，使用当前输入强制重编译，在来源回归下新建独立目录；不支持 seed 或输出根覆盖。`recover` 使用历史输入和版本恢复未完整执行的任务。两者均支持 `-dir` 指定新目录名。详见 [重跑、恢复与报告](replay_reports.md)。
+`sim` 要求已有匹配的编译产物。单跑 `rerun/recover CASE_DIR` 完全等价，默认复用编译，显式 --rebuild 才重编译；传 COM_DIR 则只重新编译。两者都支持单次回归和批次总目录。以下失败筛选和历史输入区别适用于整轮回归。`rerun` 固定失败 case/seed，使用当前输入强制重编译，在来源回归下新建独立目录；不支持 seed 或输出根覆盖。`recover` 使用历史输入和版本恢复未完整执行的任务。两者均支持 `-dir` 指定新目录名。详见 [重跑、恢复与报告](replay_reports.md)。
 
 ## 初始化与版本管理
 

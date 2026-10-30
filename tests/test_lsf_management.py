@@ -283,8 +283,7 @@ class LsfManagementTests(LsfFixture):
 
     def test_lsf_record_updates_are_checkpoints_not_poll_writes(self):
         from nsim import runner
-        self.data['fake']['durations']['smoke'] = .7
-        self.save_submit()
+        self.configure(terminal_after_queries=12)
         plan = create_plan(self.project, cases=['smoke'], submit_paths=[self.submit], seeds=[42])
         writes = []
         original = runner.write_json

@@ -87,6 +87,10 @@ def main():
                              'JOB_NAME': match['name'], 'USER': match['owner'], 'SUBMIT_TIME': match['submit_time'],
                              'OUTPUT_FILE': match['stdout'], 'ERROR_FILE': match['stderr']})
             for row in rows:
+                # Hold a completed worker as RUN for a deterministic number of
+                # polls when testing checkpoint frequency, independent of load.
+                if row['STAT'] in ('DONE', 'EXIT') and job['queries'] <= state.get('terminal_after_queries', 0):
+                    row['STAT'] = 'RUN'
                 row.update(state.get('query_overrides', {}))
             if state.get('duplicate_query') and rows:
                 rows.append(dict(rows[0]))
@@ -144,6 +148,17 @@ def main():
             process.stdin.close()
             job['worker_pid'] = process.pid
         code = process.wait()
+        # A test can hold this job active until the controller refills its
+        # window, without depending on relative worker startup/duration times.
+        deadline = time.monotonic() + 10
+        while True:
+            with state_file(folder) as state:
+                case_dir = Path(state['jobs'][job_id]['cwd']).name
+                required = state.get('terminal_requires_cases', {}).get(case_dir, 0)
+                ready = len(state['jobs']) >= required
+            if ready or time.monotonic() >= deadline:
+                break
+            time.sleep(.02)
         with state_file(folder) as state:
             if state.get('malformed_worker'):
                 request_path = Path(shlex.split(job['script'].splitlines()[1])[-2])

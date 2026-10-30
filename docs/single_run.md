@@ -4,6 +4,25 @@
 用 caselist 派发任务、建立回归报告请使用 [回归流程](regression_workflow.md)。
 submit 字段见 [Submit 语法](submit.md)，所有命令拼写见 [CLI 参考](cli_reference.md)。
 
+## 用目录映射选择 submit
+
+新工程 bootstrap 会把所选 submit 目录登记到项目 `.nsim/nsim.toml` 的
+`[catalog.submit.roots]`。例如 `local = "flows/vcs"` 时，`-sub rtl` 查找验证工程根下的
+`flows/vcs/rtl.json`，`-sub local:rtl` 明确选此目录；同名文件出现在多个配置目录时，
+使用命名空间或别名消除歧义。可先执行 `nsim catalog resolve submit rtl` 查看实际路径。
+
+```sh
+nsim com -sub rtl
+nsim run -sub local:rtl --case smoke -seed 42
+nsim sim -sub ./flows/vcs/rtl.json --case smoke -seed 42
+```
+
+最后一行的 `./flows/vcs/rtl.json` 是相对命令启动目录的显式路径，绕过映射；
+`--case smoke` 是逻辑用例名，不查找 caselist。`submit` 文件位置由 catalog 决定，
+编译和 case 产物位置由下文的 `-o/-dir/-com-dir/-sim-dir` 决定。
+修改 `[catalog]` 只影响新执行；已有 `case_dir/com_dir` 的 rerun/recover 仍绑定来源文件。
+配置、自定义 bootstrap 目录和旧工程迁移见 [TOML 名称与文件映射](catalog.md)。
+
 ## 入口与默认行为
 
 | 命令 | 选择 | 编译 | 仿真 | 默认覆盖率 | 默认波形 |

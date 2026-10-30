@@ -5,6 +5,29 @@
 caselist 的行语法见 [Caselist 语法](caselist.md)，submit 字段见 [Submit 语法](submit.md)。
 `-sub/-l/-rl` 支持 [TOML 名称映射](catalog.md)，配置后可以直接写 `-sub rtl -l smoke` 或 `-rl nightly`。
 
+## 用目录映射选择回归输入
+
+项目 `.nsim/nsim.toml` 的 `[catalog.submit.roots]`、`[catalog.caselist.roots]`、
+`[catalog.regrlist.roots]` 分别指定 submit、caselist、批量回归清单的查找目录。
+bootstrap 会按所选目录生成初始映射；后续也可添加 `aliases` 或其他命名目录。
+例如三个 `local` 根分别指向 `flows/vcs`、`tests/suites`、`plans/batches` 时：
+
+```sh
+nsim catalog resolve submit rtl
+nsim catalog resolve caselist smoke
+nsim catalog resolve regrlist nightly
+nsim regr -sub local:rtl -l local:smoke -seed 42
+nsim regr -rl local:nightly
+```
+
+`rtl` 查找 `rtl.json`；`smoke` 查找 `smoke.list` 或 `smoke.caselist`；
+`nightly` 查找 `nightly.list` 或 `nightly.regr`。存在多个命中时需指定命名空间、
+扩展名或别名。批量清单每行的 `-sub/-l` 按该行选定工程解析；
+`./tests/suites/smoke.list` 则按命令启动目录解析，不走映射。
+这些映射只选择输入文件，`regr_dir` 和其中的 `com_dir/case_dir` 仍按下文的输出选项创建。
+历史 rerun/recover 绑定来源清单和 submit，不会随别名改动转向新文件。
+完整 TOML 示例与查询规则见 [TOML 名称与文件映射](catalog.md)。
+
 ## 创建单次或批量回归
 
 ```sh

@@ -2,6 +2,58 @@
 
 项目 TOML 是文件的“地址簿”：命令只写简称，配置决定文件在哪里。
 `-sub`、`-l`、`-rl` 和 `submit show/check` 共用解析规则；`submit new` 的创建位置与默认父模板也从 TOML 读取。
+
+| 配置或选项 | 管理的目录 | 何时生效 |
+| --- | --- | --- |
+| bootstrap 的 `--*-dir` 与 TOML `[layout]` | 工程内的 filelist、caselist、regression、submit、resources、scripts 目录 | 初始化工程和生成示例文件时 |
+| TOML `[catalog.*.roots]`、`[catalog.*.aliases]` | `-sub/-l/-rl` 所选**输入文件**的查找位置 | 每次新建 run、sim、com 或 regr 计划时 |
+| `-o/-dir/-com-dir/-sim-dir` | 编译、仿真、报告的**输出目录** | 执行计划和创建产物时 |
+
+`[layout]` 本身不是运行时搜索规则；bootstrap 会按布局生成初始 `[catalog]`，之后修改短名称的查找位置应改 `[catalog]`。
+目录映射不改变 `--case` 的逻辑用例名，也不负责输出目录。单跑和回归输出分别见[独立单跑](single_run.md#目录何时创建)与[回归流程](regression_workflow.md#本轮目录与创建时机)。
+
+## 从目录到命令：一个完整例子
+
+假设 bootstrap 时指定 `--submit-dir flows/vcs --caselist-dir tests/suites --regression-dir plans/batches`，
+并在验证工程中放置 `flows/vcs/rtl.json`、`tests/suites/smoke.list` 和 `plans/batches/nightly.list`。
+bootstrap 已把这三个目录分别登记为 `submit`、`caselist`、`regrlist` 的 `local` 根；相关 TOML 内容如下：
+
+```toml
+[layout]
+submit = "flows/vcs"
+caselist = "tests/suites"
+regression = "plans/batches"
+
+[catalog.submit]
+write_root = "local"
+
+[catalog.submit.roots]
+local = "flows/vcs"
+
+[catalog.caselist.roots]
+local = "tests/suites"
+
+[catalog.regrlist.roots]
+local = "plans/batches"
+```
+
+这里只列出有关字段；实际 TOML 还包含工程字段、其他布局项和 submit 模板映射。先查询解析结果，再执行：
+
+```sh
+nsim catalog resolve submit rtl
+nsim catalog resolve caselist smoke
+nsim catalog resolve regrlist nightly
+nsim run -sub rtl --case smoke -seed 42
+nsim regr -sub rtl -l smoke -seed 42
+nsim regr -rl nightly
+```
+
+`run` 的 `--case smoke` 只是用例名，不会读取 `smoke.list`；`regr -l smoke` 才读取该清单。
+`nightly.list` 的每一行可写 `-sub rtl -l smoke -seed 42`，这些短名称同样按该行选择的工程解析。
+从工程外调用时给命令加 `--project /work/chip/verification`（替换为真实工程路径）。
+如果只想按当前目录的文件执行，可用
+`nsim regr -sub ./rtl.json -l ./smoke.list`；这两个显式路径绕过 TOML 映射。
+
 目录可以任意命名。bootstrap 默认创建 `filelist/`、`caselist/`、`regression/`、`submit/`、`resources/`、`scripts/`，并把所选位置写入项目 TOML。`resources/` 和 `scripts/` 初始为空；工具配置、示例和文件清单写到相应目录。目录名只是初始化选择，运行时依配置解析。
 
 新建工程时可分别指定目录，以下值都相对新工程的 verification 根：

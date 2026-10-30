@@ -15,6 +15,8 @@
 | 独立单跑 | [独立单跑](docs/single_run.md) | `com/run/sim` 的选项、默认值、目录、submit/CLI 优先级及 `case_dir/com_dir` 重跑 |
 | 回归 | [回归流程](docs/regression_workflow.md) | `regr -l/-rl` 的选项、目录、参数优先级，以及 `inspect/release/rerun/recover` |
 
+四个主题共用的输入目录与短名称配置见 [TOML 名称与文件映射](docs/catalog.md)：先设置 bootstrap 布局或项目 TOML 的 catalog，再用 `nsim catalog resolve` 确认 `-sub/-l/-rl` 实际选中的文件。运行产物目录由单跑和回归各自的输出选项控制。
+
 | 要做的事 | 从这里开始 |
 | --- | --- |
 | 查全部子命令、选项或常用简写 | [完整命令清单](docs/cli_reference.md)、[常用命令简版](docs/cli_quickstart.md) |

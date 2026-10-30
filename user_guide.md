@@ -514,7 +514,7 @@ nsim storage check /tmp/nsim-output --min-free-bytes 104857600
 
 `rerun` 固定来源记录中完整执行但结果失败任务的 case、seed 和 submit 选择，重新读取当前工程登记、源码、submit、caselist/YAML 与输入文件。每个 submit 强制编译一次，再完整执行对应失败 case，包含原先以 sim 启动的任务；没有 compile 步骤的 command submit 会报错。每次生成独立的 rerun_<时间_UUID>/、report/ 与 parent 引用，不覆盖历史结果。禁止 -seed/--seed/-S 和 -o/--output-root 覆盖，可用 --jobs 调整并发，以 -dir 指定新目录名。详细目录、边界及例子见 [重跑、恢复与报告](docs/replay_reports.md)。
 
-`recover` 仍使用历史输入、版本和执行阶段，仅选择没有形成完整有效结果的任务；在独立目录生成本次报告。保留原有输出根与 seed 覆盖入口；使用新 seed 的结果不替代原 seed 的汇总结论。
+`recover` 使用历史输入和版本，仅选择没有形成完整有效结果的任务；在独立目录强制重新编译、仿真和检查，再生成本次报告。即使来源为 sim 也不复用旧编译产物；没有 compile 步骤的 command submit 和纯 com 来源会明确报错。保留原有输出根与 seed 覆盖入口；使用新 seed 的结果不替代原 seed 的汇总结论。
 
 rerun 为当前输入建立新的 hash 和配置快照，不要求与历史输入相同；本次执行前后仍检查输入一致性。recover 要求历史输入和运行时可验证。两者都拒绝损坏的控制记录和未确认终态的来源，不自动重叠派发状态未知的旧任务。
 

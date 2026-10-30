@@ -233,11 +233,11 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 | 命令 | 全部选项 | 默认行为 |
 | --- | --- | --- |
 | `rerun SOURCE` | `-dir / --dir NAME`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | 完整执行但结果失败的任务；在来源回归下新建独立目录并使用当前输入强制编译 |
-| `recover SOURCE` | `-dir / --dir NAME`、`-o / --output-root PATH`、`-seed / --seed N`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | 不完整任务；在来源回归下新建目录，使用历史输入与版本 |
+| `recover SOURCE` | `-dir / --dir NAME`、`-o / --output-root PATH`、`-seed / --seed N`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | 不完整任务；在新目录使用历史输入与版本强制编译、仿真和检查 |
 | `report SOURCE` | `--json`、`--rebuild`、`-dir / --dir NAME`、`--include PATH` | 手动 rebuild 时汇总原回归与最新一次 rerun、recover，生成新报告目录；`--include` 指定有歧义或其他输出根的目录 |
 | `storage check ROOT` | `--min-free-bytes N`、`--min-free-inodes N` | 两个阈值均默认 0；输出 JSON |
 
-`rerun` 不接受 `-seed/--seed/-S` 或 `-o/--output-root`（包括子命令前的全局选项）。`recover` 保留输出根和单个 seed 覆盖入口。两者的并发选项支持 `-j / -jobs / --jobs`，不接受 `--project`、`--dry-run`、`-sub`、`-l`、`-repeat` 或队列覆盖。rerun 使用来源工程的当前输入、submit 配置与版本 pin；recover 使用历史输入与版本。`-dir` 精确指定新目录名，已存在则报错；自动目录名重名会重新生成。详见 [重跑、恢复与报告](replay_reports.md)。
+`rerun` 不接受 `-seed/--seed/-S` 或 `-o/--output-root`（包括子命令前的全局选项）。`recover` 保留输出根和单个 seed 覆盖入口。两者的并发选项支持 `-j / -jobs / --jobs`，不接受 `--project`、`--dry-run`、`-sub`、`-l`、`-repeat` 或队列覆盖。rerun 使用来源工程的当前输入、submit 配置与版本 pin；recover 使用历史输入与版本。两者均强制重新编译、仿真和检查；没有 compile 步骤的 command submit 会报错，纯 com 来源不能 recover 为完整仿真。`-dir` 精确指定新目录名，已存在则报错；自动目录名重名会重新生成。详见 [重跑、恢复与报告](replay_reports.md)。
 
 `storage check` 会在目录内创建临时探测文件，完成读写与 fsync 后删除。`recover` 重新执行相关任务，不是仿真断点续跑。
 

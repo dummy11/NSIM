@@ -386,33 +386,30 @@ def replay(source, roots=None, recovery=False, seed=None, output_dir=None, **ove
         settings.update(retries=0, retry_seconds=0)
         settings.update({key: value for key, value in overrides.items() if value is not None})
         return _run_replay(plan, roots, settings, output_dir)
+    if original['execution']['phase'] == 'com':
+        raise ConfigError('recover requires simulation cases; use run or regr after a compile-only failure')
     check_identity(original)
     selected = [task for task in state['tasks'] if task['effective_verdict'] not in
                 ACCEPTED | {'FAIL', 'NO_COMPARE', 'INPUT_CHANGED'}]
     if not selected:
         return None, {"passed": state["passed"], "message": "no matching failed tasks", "tasks": []}
+    for index in {task['submit'] for task in selected}:
+        submit = original['submits'][index]
+        if submit['adapter'] == 'command' and not submit.get('compile'):
+            raise ConfigError(f'recover requires a compile step for submit {submit["name"]}; '
+                              'prebuilt-only inputs cannot be rebuilt')
     from nsim.replay_paths import anchor, directory_name
     _, anchor_path = anchor(original)
     name = directory_name(output_dir, 'recover')
     plan = copy.deepcopy(original)
     plan['execution'].pop('rerun_parent', None)
+    plan['execution'].pop('reuse_builds', None)
+    plan.pop('build_refs', None)
     plan['id'] = name if output_dir is None else new_regression_id(plan.get('caselists', []))
     plan['kind'] = 'regression'
-    plan['execution'].update(layout='isolated-regression-v1', replay_parent=anchor_path, replay_dir=name)
-    if original['execution']['phase'] != 'com':
-        if original['execution']['phase'] == 'sim':
-            plan['execution']['reuse_builds'] = {
-                str(task['submit']): original['build_refs'][task['id']]
-                for task in original['tasks']}
-            plan.pop('build_refs', None)
-        else:
-            plan['execution']['phase'] = 'regr'
-        for field in ('com_dir', 'sim_dir'):
-            value = Path(plan['execution'].get(field, field))
-            if value.is_absolute():
-                # The historical absolute product is evidence, not the target
-                # for a new isolated replay.
-                plan['execution'][field] = field
+    plan['execution'].update(phase='regr', layout='isolated-regression-v1',
+                             replay_parent=anchor_path, replay_dir=name,
+                             com_dir='com_dir', sim_dir='sim_dir')
     if 'batch' in plan:
         plan['source_batch'] = plan.pop('batch')
     plan['source'] = {'journal': str(source), 'id': original['id'], 'mode': 'recover',

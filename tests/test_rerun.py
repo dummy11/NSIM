@@ -99,6 +99,44 @@ Path(result).write_text(json.dumps({'schema_version': 1, 'case': case, 'seed': i
         self.assertEqual(plan['execution']['phase'], 'regr')
         self.assertNotEqual(build_directory(self.out, plan, plan['tasks'][0]), old_build)
 
+    def test_recover_from_sim_recompiles_historical_inputs_before_simulation(self):
+        self.command_setup()
+        run(create_plan(self.project, submit_paths=[self.submit], phase='com'), [self.out])
+        original = create_plan(self.project, cases=['smoke'], seeds=[42],
+                               submit_paths=[self.submit], phase='sim')
+        record, state = run(original, [self.out])
+        self.assertTrue(state['passed'])
+        old_build = build_directory(self.out, original, original['tasks'][0])
+        old_hash = digest(old_build / 'build.json')
+        (record / 'run.log').write_text('damaged evidence')
+        recovered, state = replay(record, recovery=True)
+        plan, _ = load_final(recovered)
+        self.assertTrue(state['passed'], state)
+        self.assertEqual(plan['execution']['phase'], 'regr')
+        self.assertEqual((self.base / 'count').read_text(), 'compile\ncompile\n')
+        self.assertNotEqual(build_directory(self.out, plan, plan['tasks'][0]), old_build)
+        self.assertEqual(digest(old_build / 'build.json'), old_hash)
+
+    def test_recover_requires_a_compile_step_and_rejects_compile_only_source(self):
+        test_execution_stages.ExecutionStagesTests.command_submit(self)
+        del self.data['compile']
+        self.data['argv'] = [sys.executable, '{project}/simulator.py', '{case}', '{seed}', '{result}']
+        self.save_submit()
+        original = create_plan(self.project, cases=['smoke'], seeds=[42], submit_paths=[self.submit])
+        record, state = run(original, [self.out])
+        self.assertTrue(state['passed'])
+        (record / 'run.log').write_text('damaged evidence')
+        with self.assertRaisesRegex(ConfigError, 'requires a compile step'):
+            replay(record, recovery=True)
+        self.assertFalse(list((self.out / 'base' / 'rtl').glob('recover_*')))
+
+        self.command_setup()
+        self.data['compile']['argv'] = [sys.executable, '-c', 'raise SystemExit(7)']
+        self.save_submit()
+        compile_record, _ = run(create_plan(self.project, submit_paths=[self.submit], phase='com'), [self.backup])
+        with self.assertRaisesRegex(ConfigError, 'requires simulation cases'):
+            replay(compile_record, recovery=True)
+
     def test_lsf_rebuild_uses_nested_layout_and_current_inputs(self):
         from test_lsf import LsfTests
         farm = LsfTests()

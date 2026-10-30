@@ -6,7 +6,12 @@
 `NO_COMPARE`）。它保留原 case/submit/seed 选择，读取当前输入并重新编译。
 `recover` 处理没有形成完整有效结果的任务，例如 `INCOMPLETE`、`CRASH`、
 `TIMEOUT`、`COMPILE_FAIL`、`HOOK_FAIL` 和基础设施错误；它校验历史输入与运行时，
-从头重新执行。`INPUT_CHANGED` 不作精确恢复，需发起新运行。
+在新目录强制重新编译，再仿真和检查。即使来源是 `sim`，也不复用旧编译产物。
+`INPUT_CHANGED` 不作精确恢复，需发起新运行。
+两者的执行流程都是编译、仿真和检查；区别是选择的任务及输入身份：rerun 使用
+当前输入，recover 使用可验证的历史输入。对没有 `compile` 步骤的 command submit，
+两者都明确报错。fake 适配器会重新生成测试用准备产物，不宣称调用真实编译器。
+纯 `com` 记录没有仿真 case，不能用 recover 生成完整仿真；需要使用 run/regr 发起新运行。
 两者都不自动调用 `report --rebuild`。
 
 当前两种操作仍要求来源有可校验的终态控制记录。没有终态、旧 LSF 作业状态未明、
@@ -34,6 +39,8 @@
 `recover -o ROOT` 可改用其他输出根，在新根的 `regr_dir/<原回归ID>/` 下创建目录；
 跨根的结果须用 `report --rebuild --include` 指定。单 case 来源则在原 submit
 工作区下创建独立目录。
+recover 的新目录使用自己的 `com_dir` 和 `sim_dir`，不写回旧的绝对或相对
+产物路径。旧编译产物不作为这次 recover 的编译结果。
 
 ## 手动汇总
 

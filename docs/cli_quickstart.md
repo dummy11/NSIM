@@ -41,13 +41,15 @@ nsim run -s rtl -c smoke -S 42 -n
 | 写法 | 含义 | 例子 |
 | --- | --- | --- |
 | `-s` | submit 名称，可多个 | `-s rtl rtl_debug` |
-| `-c` | 单个逻辑用例 | `-c smoke` |
+| `-c` | 单跑的逻辑用例，可多个 | `-c smoke fast` |
 | `-l` | 用例清单，可多个 | `-l smoke.list stress.list` |
 | `-S` | 固定随机种子，可多个 | `-S 42 43` |
 | `-j` | 并发任务数 | `-j 8` |
 | `-o` | 临时输出根 | `-o /scratch/debug_out` |
 
-`-c` 与 `-l` 二选一；普通回归用 `-l`，批量回归列表用 `-rl`。`-r` 仅用于 regr，与 `-S` 二选一。不指定 seed 时随机生成一个并记录。
+`run/sim` 只用 `-c`，一次多个 case/submit/seed 仍分别单跑，共用该 submit 的一次编译；
+不支持 `-l`。普通回归用 `regr -l`，批量回归列表用 `regr -rl`。
+`-r` 仅用于 regr，与 `-S` 二选一。不指定 seed 时随机生成一个并记录。
 
 `-j` 在执行和重跑命令中均可使用。`-s` 和 `-S` 区分大小写。
 
@@ -62,6 +64,9 @@ nsim run -s rtl -c smoke -S 42 -n
 | 本机执行 | `-sched local` |
 | 使用 LSF 队列 | `-sched lsf -q QUEUE` |
 | 只预览 | `-n` |
+| 单跑打开覆盖率 | `--coverage on`；若单独 `sim`，先用 `com --coverage on` 编译 |
+| 回归打开波形 | `--waves on` |
+| 单 case 只切换波形 | `nsim rr CASE_DIR --waves on`；编译参数变化加 `--rebuild` |
 
 进入工程后省略 `-p`；使用 submit 的默认模式时省略 `-mode`；默认工作区也是该模式。队列、资源、license 等重复设置放进公共 submit，日常只切换 `-s`。
 

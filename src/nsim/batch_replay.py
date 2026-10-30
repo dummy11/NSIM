@@ -11,7 +11,7 @@ from nsim.reports import load_final
 
 
 def replay_batch(source, original, state, roots=None, recovery=False, seed=None,
-                 output_dir=None, rebuild=False, **overrides):
+                 output_dir=None, rebuild=False, execution_options=None, plusargs=(), **overrides):
     from nsim.service import prepare_replay, validate_roots
     if not recovery and (roots is not None or seed is not None):
         raise ConfigError('rerun preserves case/seed and the original output root; overrides are not supported')
@@ -26,7 +26,8 @@ def replay_batch(source, original, state, roots=None, recovery=False, seed=None,
         record = Path(row['record_dir'])
         child_plan, child_state = load_final(record)
         prepared = prepare_replay(record, child_plan, child_state, roots=roots, recovery=recovery,
-                                  seed=seed, rebuild=rebuild, **overrides)
+                                  seed=seed, rebuild=rebuild, execution_options=execution_options,
+                                  plusargs=plusargs, **overrides)
         if prepared is None:
             skipped.append(dict(id=row['id'], line=row['line'], record_dir=str(record),
                                 reason='no matching failed tasks'))

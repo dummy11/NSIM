@@ -20,7 +20,7 @@ def common_submit(mode):
     if result['adapter'] == 'vcs':
         result['vcs'] = {
             'executable': 'vcs', 'compile_args': ['-full64', '-sverilog'], 'run_args': [],
-            'compile_timeout_seconds': 600, 'golden_enabled': False, 'fsdb': False,
+            'compile_timeout_seconds': 600, 'golden_enabled': False,
             'fsdb_file': '{wave_dir}/wave.fsdb', 'fsdb_plusargs': ['+fsdb', '+NSIM_FSDB={wave}'],
             'result_argv': [], 'verdi': 'verdi',
         }
@@ -50,9 +50,13 @@ def file_demo():
     }
     value['case_defaults'] = {'uvm_test': 'YOUR_UVM_TEST', 'seq': '{case}'}
     value['plusargs'] = ['+UVM_VERBOSITY=UVM_LOW', '+NSIM_INPUT_DIR={file:stimuli}', '+NSIM_BOOT_IMAGE={file:firmware}']
-    value['vcs']['compile_args'] += ['-cm', 'line+cond+fsm+tgl+branch', '-cm_hier', '{file:coverage_hier}',
-                                     '-xprop={file:xprop_config}', '-partcomp', '+optconfigfile+{file:partition_config}']
-    value['vcs']['run_args'] = ['-cm', 'line+cond+fsm+tgl+branch', '-ucli', '-do', '{file:ucli_script}']
+    value['vcs']['coverage'] = {
+        'compile_args': ['-cm', 'line+cond+fsm+tgl+branch', '-cm_hier', '{file:coverage_hier}'],
+        'run_args': ['-cm', 'line+cond+fsm+tgl+branch'],
+    }
+    value['vcs']['compile_args'] += ['-xprop={file:xprop_config}', '-partcomp',
+                                     '+optconfigfile+{file:partition_config}']
+    value['vcs']['run_args'] = ['-ucli', '-do', '{file:ucli_script}']
     value['log_analysis']['error_filter'] = '{file:errors}'
     return value
 
@@ -236,7 +240,19 @@ bsub/bjobs/bkill/worker_python 指定工具；poll/deadline/cancel/command_timeo
 均为至少 0.01 的秒数，分别控制轮询、总运行预算、取消确认、调度命令、未知状态与结果等待。
 local 不调用 LSF 工具。命令行队列覆盖发生在继承合并之后。
 
-fsdb 只控制是否附加 fsdb_plusargs，不改变编译命令或编译身份；能否生成 FSDB 取决于 TB 和工具编译配置。fsdb_file 指定波形路径，verdi 指定查看器。
+新 submit 不声明 fsdb 布尔开关。单跑 run/sim 默认打开波形，regr 默认关闭；--waves on/off 显式覆盖。
+vcs.fsdb_plusargs 和 fsdb_file 仅定义波形参数与文件位置；启用时会附加 plusargs，不修改编译命令或编译身份。
+能否生成 FSDB 还取决于 TB 的 dump 逻辑和实际编译选项。旧 submit 的 fsdb 布尔值仍可读取，未指定 --waves 时沿用其值；建议迁移后删除。
+vcs.coverage.compile_args/run_args 分别定义覆盖率编译插桩与运行采集参数，不含启用开关。
+未填写 -cm 指标的一侧沿用另一侧的指标；两侧都未填写时使用 line+cond+fsm+tgl+branch。
+run/sim/com 默认关闭覆盖率，regr 默认打开；--coverage on/off 显式覆盖。单独 sim --coverage on 需要已有的编译产物具备插桩。
+旧 submit 放在 vcs.compile_args/run_args 的 -cm 参数会转入覆盖率参数组，因此其单跑默认行为会变化；迁移时应核对命令预览。
+--cm-metrics、--cm-hier、--cm-dir 可以分别改写指标、层次文件和运行输出目录；CLI 显式值高于 submit 覆盖率参数。
+command 适配器可在顶层 coverage.compile_args/run_args 和 waveform.run_args 配置包装器自己的参数；
+开关按相同场景默认值应用这些参数。未配置 recipe 的包装器不会因开关而自动生成覆盖率或波形。
+command 的覆盖率编译参数要求声明 compile 步骤；sim 复用时会核对已有编译的插桩状态。
+包装器必须识别所配置参数并实际生成产物，nsim 不从开关推断覆盖率文件或波形文件存在。
+verdi 指定查看器。
 dpi 可省略或为 null；makefile 相对工程根，make/cc/cxx 指定工具，scope 支持 project/regression/run，
 target 为安全名称，args 为传给 make 的附加参数，timeout_seconds 至少 0.01。
 result_argv 为结果转换/检查命令；空数组表示不配置该命令。真实结果须满足 nsim 结果协议。
@@ -267,7 +283,8 @@ glob 条目用于追踪集合，不能作为一个 {file:NAME} 参数；需要�
 输入只读，包含显式登记的工程外文件与目录；输出目录不能与这些输入重叠。
 命令行运行过程中仍读取经过校验的源路径，快照用于审计，不自动替换活跃输入或提供离线重跑。
 
-文件引用可用于 compile.argv、command.argv、plusargs、vcs.compile_args/run_args/result_argv/fsdb_plusargs、
+文件引用可用于 compile.argv、command.argv、plusargs、vcs.compile_args/run_args/coverage.compile_args/coverage.run_args/result_argv/fsdb_plusargs、
+command 的 coverage.compile_args/run_args 和 waveform.run_args、
 四阶段 hooks、DPI Makefile/args，以及 case_defaults、caselist/case.yaml 的值和 CLI plusargs。
 pre_compile/post_compile 要求 compile；pre_sim 要求 simulate；post_sim/result_argv 要求 analysis。
 未知名称、阶段不匹配、空 glob、缺失文件会报错。argv[0] 可以是完整的 {file:script} 引用，且必须可执行。
@@ -314,6 +331,21 @@ FPGA/硬件平台没有通用编译命令，示例脚本必须由工程实现。
 
 ```json
 ''' + pretty(COMMAND_DEMO) + '''```
+
+包装器支持相应参数时，可按以下完整 submit 配置；示例参数名需替换为包装器的真实接口：
+
+```json
+{
+  "schema_version": 1,
+  "name": "command_profile_example",
+  "adapter": "command",
+  "required_checks": ["functional"],
+  "compile": {"argv": ["build_wrapper", "{project}", "{build_dir}"], "artifacts": ["simulator"]},
+  "argv": ["{build_dir}/simulator", "--case", "{case}", "--result", "{result}"],
+  "coverage": {"compile_args": ["--instrument-coverage"], "run_args": ["--collect-coverage"]},
+  "waveform": {"run_args": ["--dump-wave", "{wave_dir}/wave.fsdb"]}
+}
+```
 
 ## Fake 适配器
 

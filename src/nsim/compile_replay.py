@@ -61,13 +61,23 @@ def load_compile_source(source):
     return plan, state
 
 
-def prepare_compile_rerun(source, original, state, output_dir=None):
+def prepare_compile_rerun(source, original, state, output_dir=None, execution_options=None):
+    from nsim.profiles import changed, merged_options, recorded
+    if changed({key: value for key, value in (execution_options or {}).items()
+                if key in ('waves', 'sim_args', 'cm_dir')}):
+        raise ConfigError('compile directory replay does not accept waveform or simulation options')
     indices = list(dict.fromkeys(task['submit'] for task in original['tasks']))
     submits = [original['submits'][index] for index in indices]
     root, parent = anchor(original)
+    retained = {key: value for key, value in original['execution'].get('options', {}).items()
+                if key in ('coverage', 'compile_args', 'defines', 'cm_metrics', 'cm_hier')}
+    selected = {key: value for key, value in (execution_options or {}).items()
+                if key in ('coverage', 'compile_args', 'defines', 'cm_metrics', 'cm_hier')}
     plan = create_plan(original['project']['root'], phase='com',
                        submit_paths=[submit['source'] for submit in submits],
-                       directory=original['execution']['workspace'])
+                       directory=original['execution']['workspace'],
+                       execution_options=merged_options(retained, selected),
+                       profile_defaults=recorded(original))
     if [submit['name'] for submit in plan['submits']] != [submit['name'] for submit in submits]:
         raise ConfigError('rerun submit names no longer match the original compilation')
     for submit in plan['submits']:

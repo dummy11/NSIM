@@ -215,6 +215,14 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 | `-q / -queue / --queue QUEUE` | submit 配置 | 覆盖调度队列 |
 | `--resource EXPR` | submit 配置 | 覆盖 LSF 资源表达式列表；可重复 |
 | `--license RESOURCE=COUNT` | submit 配置 | 覆盖 LSF license 资源配置；可重复，COUNT 为正整数 |
+| `--coverage on/off` | run/sim/com 关闭，regr 打开 | 显式控制覆盖率插桩与采集；sim 只控制采集，要求已有匹配编译 |
+| `--waves on/off` | run/sim 打开，regr 关闭 | 显式控制 VCS 波形 plusargs；com 无此参数 |
+| `--compile-arg VALUE` | 空 | 追加编译参数；com/run/regr 可用，前导 `-` 用 `--compile-arg=VALUE` |
+| `--sim-arg VALUE` | 空 | 追加仿真参数；run/sim/regr 可用，前导 `-` 用 `--sim-arg=VALUE` |
+| `--define NAME[=VALUE]` | 空 | 追加 VCS 编译 define；com/run/regr 可用 |
+| `--cm-metrics METRICS` | submit recipe | 覆盖 VCS `-cm` 指标；com/run/regr 可用，需打开覆盖率 |
+| `--cm-hier FILE` | submit recipe | 覆盖 VCS `-cm_hier` 文件；com/run/regr 可用，需打开覆盖率 |
+| `--cm-dir PATH` | submit recipe | 覆盖 VCS 运行 `-cm_dir`；run/sim/regr 可用，需打开覆盖率 |
 
 执行阶段的 `-mode`、`-dir`、`-com-dir`、`-sim-dir`、`-repeat` 同时支持对应的双横线形式和上表的短选项。
 
@@ -238,6 +246,15 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 | `storage check ROOT` | `--min-free-bytes N`、`--min-free-inodes N` | 两个阈值均默认 0；输出 JSON |
 
 `rerun` 不接受 `-seed/--seed/-S` 或 `-o/--output-root`（包括子命令前的全局选项）。整轮/批量 `recover` 保留输出根和单个 seed 覆盖入口；单跑时与 rerun 一样拒绝这两个覆盖。两者的并发选项支持 `-j / -jobs / --jobs`，不接受 `--project`、`--dry-run`、`-sub`、`-l`、`-repeat` 或队列覆盖。rerun 和单跑 recover 使用来源工程的当前输入、submit 配置与版本 pin；整轮 recover 使用历史输入与版本。整轮回归 rerun 和 recover 强制重新编译、仿真和检查；case_dir 的 rerun/recover 默认校验复用原编译，只有 --rebuild 才重编译，com_dir 的 rerun/recover 则只编译。需要重编译时，没有 compile 步骤的 command submit 会报错；com_dir 来源只重新编译。`-dir` 精确指定新目录名，已存在则报错；自动目录名重名会重新生成。详见 [重跑、恢复与报告](replay_reports.md)。
+
+`rerun/recover` 的单 case 与 com_dir 入口还接受 `--coverage`、`--waves`、`--compile-arg`、
+`--sim-arg`、`--define`、`--cm-metrics`、`--cm-hier`、`--cm-dir` 和 `--plusargs`，但 com_dir
+只接受编译相关项。单 case 默认继承来源的有效覆盖率、波形及命令行阶段参数；编译相关覆盖
+若与来源编译身份不匹配，需加 `--rebuild`。整轮 rerun 可以覆盖这些参数，整轮 recover
+拒绝覆盖以保持历史执行命令。新 submit 不设波形或覆盖率开关，具体 VCS 参数写在
+`vcs.fsdb_plusargs` 与 `vcs.coverage.compile_args/run_args`。
+`command` 包装器可在 submit 顶层声明 `coverage.compile_args/run_args` 与
+`waveform.run_args`，让同一开关向包装器传递参数；未声明时不开启实际产物生成。
 
 `case_dir` 是 `sim_dir/<case>_<seed>`；`sim_dir` 父目录不作为单 case 入口。单 case rerun/recover 不按原判定过滤，复用失败时提示 --rebuild，不自动编译；新结果和编译快照使用独立目录。`rerun/recover --rebuild` 执行编译，`report --rebuild` 仅生成报告。
 

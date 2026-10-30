@@ -67,6 +67,20 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
             add_argument(seeds, '-seed', '--seed', action='extend', nargs='+', type=int)
             if stage == 'regr':
                 add_argument(seeds, '-repeat', type=int, help='Generate N distinct random seeds; exclusive with -seed')
+        add_argument(execute, '--coverage', choices=('on', 'off'),
+                     help='Override the scenario coverage default')
+        if stage != 'com':
+            add_argument(execute, '--waves', choices=('on', 'off'),
+                         help='Override the scenario waveform default')
+            add_argument(execute, '--sim-arg', action='append', default=[],
+                         help='Append a simulation argument; use --sim-arg=VALUE for a leading dash')
+            add_argument(execute, '--cm-dir', help='Override the VCS coverage output directory')
+        if stage != 'sim':
+            add_argument(execute, '--compile-arg', action='append', default=[],
+                         help='Append a compile argument; use --compile-arg=VALUE for a leading dash')
+            add_argument(execute, '--define', action='append', default=[], help='VCS compile define NAME[=VALUE]')
+            add_argument(execute, '--cm-metrics', help='Override VCS coverage metrics')
+            add_argument(execute, '--cm-hier', help='Override the VCS coverage hierarchy file')
         add_argument(execute, '-sub', '--submit', action='extend', nargs='+', type=Path, required=stage != 'regr',
                              help='Submit names under project/submit, or explicit JSON paths')
         add_argument(execute, '-mode', choices=MODES, help='Default: infer from submits; an explicit mode must match')
@@ -101,6 +115,15 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
         add_argument(again, "--retries", type=int)
         add_argument(again, "--retry-seconds", type=float)
         add_argument(again, '-dir', '--dir', dest='output_dir', help='Name the new replay directory')
+        add_argument(again, '--coverage', choices=('on', 'off'))
+        add_argument(again, '--waves', choices=('on', 'off'))
+        add_argument(again, '--compile-arg', action='append', default=[])
+        add_argument(again, '--sim-arg', action='append', default=[])
+        add_argument(again, '--define', action='append', default=[])
+        add_argument(again, '--cm-metrics')
+        add_argument(again, '--cm-hier')
+        add_argument(again, '--cm-dir')
+        add_argument(again, '--plusargs', action='extend', nargs='+', default=[])
     report = add_command(commands, "report", help="Inspect saved results or rebuild an HTML report")
     add_argument(report, "source", type=Path, help="Completed case, regression or batch directory")
     add_argument(report, "--rebuild", action="store_true", help="Write a derived HTML view without changing execution records")
@@ -131,6 +154,17 @@ def resolve_submits(root, values):
     return paths
 
 
+def execution_options(args):
+    return dict(coverage=None if getattr(args, 'coverage', None) is None else args.coverage == 'on',
+                waves=None if getattr(args, 'waves', None) is None else args.waves == 'on',
+                compile_args=list(getattr(args, 'compile_arg', [])),
+                sim_args=list(getattr(args, 'sim_arg', [])),
+                defines=list(getattr(args, 'define', [])),
+                cm_metrics=getattr(args, 'cm_metrics', None),
+                cm_hier=getattr(args, 'cm_hier', None),
+                cm_dir=getattr(args, 'cm_dir', None))
+
+
 def prepare_execution(args):
     if not args.submit:
         raise ConfigError('one or more -sub/--submit values are required')
@@ -141,22 +175,58 @@ def prepare_execution(args):
         except ValueError as exc:
             raise ConfigError('--license requires resource=positive-integer') from exc
     root = resolve_root(args.project)
-    plan = create_plan(root, caselist=getattr(args, "caselist", None),
-                       cases=getattr(args, 'case', None),
-                       submit_paths=resolve_submits(root, args.submit), seeds=getattr(args, 'seed', None),
-                       allow_missing_tools=args.dry_run, scheduler_overrides=overrides,
-                       phase=args.command, mode=args.mode, directory=args.dir,
-                       com_dir=args.com_dir, sim_dir=args.sim_dir, repeat=getattr(args, 'repeat', None),
-                       plusargs=getattr(args, 'plusargs', []))
-    if args.command in ('run', 'sim'):
-        # Explicit selections remain independent single runs even when expanded.
-        plan['execution']['layout'] = 'single-v1'
+    submits = resolve_submits(root, args.submit)
+    selected_options = execution_options(args)
+    def planned(seeds, options):
+        result = create_plan(root, caselist=getattr(args, "caselist", None),
+                             cases=getattr(args, 'case', None), submit_paths=submits, seeds=seeds,
+                             allow_missing_tools=args.dry_run, scheduler_overrides=overrides,
+                             phase=args.command, mode=args.mode, directory=args.dir,
+                             com_dir=args.com_dir, sim_dir=args.sim_dir, repeat=getattr(args, 'repeat', None),
+                             plusargs=getattr(args, 'plusargs', []), execution_options=options)
+        if args.command in ('run', 'sim'):
+            result['execution']['layout'] = 'single-v1'
+        return result
+    plan = planned(getattr(args, 'seed', None), selected_options)
     defaults = plan['project'].get('storage_defaults', {})
     roots = args.output_root or args.global_output_root or defaults.get('output_roots') or (
         [os.environ['NSIM_OUTPUT_ROOT']] if os.environ.get('NSIM_OUTPUT_ROOT') else None)
     if not roots:
         raise ConfigError('provide --output-root, or save project defaults with '
                           'nsim update --project NAME --output-root PATH')
+    if args.command == 'sim':
+        from nsim.layout import build_directory
+        from nsim.config import read_json
+        compile_profiles = {}
+        for task in plan['tasks']:
+            submit = plan['submits'][task['submit']]
+            command_coverage = submit['adapter'] == 'command' and bool(submit.get('coverage', {}).get('compile_args'))
+            if (submit['adapter'] != 'vcs' and not command_coverage) or submit['name'] in compile_profiles:
+                continue
+            manifest_path = build_directory(Path(roots[0]).resolve(), plan, task) / 'build.json'
+            if manifest_path.is_file():
+                manifest = read_json(manifest_path)
+                recorded_config = manifest.get('config') if isinstance(manifest, dict) else None
+                if not isinstance(recorded_config, dict):
+                    raise ConfigError(f'invalid build manifest: {manifest_path}')
+                if submit['adapter'] == 'vcs':
+                    config = recorded_config.get('vcs')
+                    if not isinstance(config, dict):
+                        raise ConfigError(f'invalid VCS build manifest: {manifest_path}')
+                    compile_profiles[submit['name']] = config.get('coverage_compile_enabled',
+                        '-cm' in config.get('compile_args', []))
+                else:
+                    compile_profiles[submit['name']] = recorded_config.get('coverage_compile_enabled', False)
+        if compile_profiles:
+            selected_options['compile_coverage_by_submit'] = compile_profiles
+            original_seed_selection = plan['seed_selection']
+            plan = planned(plan['seed_selection']['values'], selected_options)
+            plan['seed_selection'] = original_seed_selection
+        for submit in plan['submits']:
+            profile = submit['effective_profile']
+            requires_instrumentation = (submit['adapter'] == 'vcs' or bool(submit.get('coverage', {}).get('compile_args')))
+            if requires_instrumentation and profile['coverage'] and not profile['compile_coverage']:
+                raise ConfigError('sim --coverage on requires coverage-instrumented compilation; run nsim com --coverage on')
     from nsim.config import integer, number
     integer(args.jobs, 'jobs', 1)
     integer(args.retries, 'retries')
@@ -226,7 +296,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             journal, state = replay(args.source, roots=getattr(args, 'output_root', None) or args.global_output_root,
                                     recovery=args.command == "recover", seed=getattr(args, 'seed', None), jobs=args.jobs,
                                     retries=args.retries, retry_seconds=args.retry_seconds,
-                                    output_dir=args.output_dir, rebuild=getattr(args, 'rebuild', False))
+                                    output_dir=args.output_dir, rebuild=getattr(args, 'rebuild', False),
+                                    execution_options=execution_options(args), plusargs=args.plusargs)
         else:
             parser.print_help()
             return 0

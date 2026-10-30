@@ -47,7 +47,14 @@ submit 的 `adapter: "vcs"` 接受 `vcs` 对象：
 - `filelist`：schema 1 必需，相对 `source_root`。支持 `-f`、`-F`、`-v`、`-y`、`-top`、`+incdir+`、`+define+`、`+libext+` 和源文件。其它选项报错，需放入 `compile_args`。`-F` 内的路径相对该嵌套列表所在目录。
 - `executable`、`compile_args`、`run_args`、`compile_timeout_seconds`、`top`。
 - `golden_enabled`：默认 false；required_checks 要求 golden 时必须显式 true，这个声明本身不证明比较有效。
-- `fsdb`、`fsdb_plusargs`、`fsdb_file`。默认波形在 `{wave_dir}/wave.fsdb`；相对文件名以隔离运行目录解析，工程必须支持相应 plusarg。
+- `fsdb_plusargs`、`fsdb_file` 定义波形参数和目标文件；`--waves on/off` 控制是否附加参数。
+  单跑默认打开、回归默认关闭。旧 submit 的 `fsdb` 布尔值只作为兼容输入；新模板已删除。
+  默认波形路径为 `{wave_dir}/wave.fsdb`；工程必须提供实际 dump 逻辑。
+- `coverage.compile_args/run_args` 定义覆盖率插桩和采集参数；`--coverage on/off` 控制启用。
+  单跑默认关闭、回归默认打开；默认指标为 `line+cond+fsm+tgl+branch`。
+
+`command` 包装器可在 submit 顶层声明 `coverage.compile_args/run_args`、`waveform.run_args`，
+作为同一开关控制的包装器参数；参数格式由包装器定义。
 - `result_argv`：工程检查器调用预览；默认空。真实接入时需生成本地接口定义的结果 JSON。
 - `verdi`：默认 `verdi`，仅用于预览。
 - `dpi`：独立 Makefile 的 `makefile`、`make`、`cc`、`cxx`、`target`、`args`、`timeout_seconds`、`scope`（project/regression/run）。生成 `NSIM_DPI_OUTPUT`、`NSIM_PROJECT_ROOT`、CC/CXX 的 make 参数预览，dry-run 不创建 cache 或构建 `.so`。

@@ -73,16 +73,19 @@ def check_identity(plan):
 
 
 def create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds=None, allow_missing_tools=False, scheduler_overrides=None,
-                phase='run', mode=None, directory=None, com_dir='com_dir', sim_dir='sim_dir', repeat=None, plusargs=(), task_selection=None):
+                phase='run', mode=None, directory=None, com_dir='com_dir', sim_dir='sim_dir', repeat=None, plusargs=(), task_selection=None,
+                execution_options=None, profile_defaults=None):
     from nsim.projects import registry_lock, project_lock
     root = resolve_root(project_path)
     with registry_lock(), project_lock(root):
         return _create_plan(root, caselist, cases, submit_paths, seeds, allow_missing_tools, scheduler_overrides,
-                            phase, mode, directory, com_dir, sim_dir, repeat, plusargs, task_selection)
+                            phase, mode, directory, com_dir, sim_dir, repeat, plusargs, task_selection,
+                            execution_options, profile_defaults)
 
 
 def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds=None, allow_missing_tools=False, scheduler_overrides=None,
-                 phase='run', mode=None, directory=None, com_dir='com_dir', sim_dir='sim_dir', repeat=None, plusargs=(), task_selection=None):
+                 phase='run', mode=None, directory=None, com_dir='com_dir', sim_dir='sim_dir', repeat=None, plusargs=(), task_selection=None,
+                 execution_options=None, profile_defaults=None):
     if phase not in ('com', 'sim', 'run', 'regr') or (mode is not None and mode not in MODES):
         raise ConfigError('invalid execution stage or mode')
     if directory is not None:
@@ -110,6 +113,12 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
     config_paths.extend(caselists)
     config_bytes = {str(p): p.read_bytes() for p in config_paths}
     project = load_project(Path(project_path))
+    execution_options = dict(execution_options or {})
+    if execution_options.get('cm_hier') is not None:
+        hierarchy = (project.root / execution_options['cm_hier']).resolve()
+        if not hierarchy.is_file():
+            raise ConfigError(f'coverage hierarchy file unavailable: {hierarchy}')
+        execution_options['cm_hier'] = str(hierarchy)
     pin = project.descriptor.parent / ".nsim_version"
     selected_version = None
     if pin.is_symlink():
@@ -170,8 +179,16 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
         submit["source"] = str(path)
         submit['source_chain'] = list(submit_sources)
         submit['resolved_files'] = submit_files.collect(submit['files'], project.root)
+        from nsim.profiles import apply as apply_profile
+        selected_options = dict(execution_options)
+        compile_profiles = selected_options.pop('compile_coverage_by_submit', {})
+        if submit['name'] in compile_profiles:
+            selected_options['compile_coverage'] = compile_profiles[submit['name']]
+        apply_profile(submit, phase, selected_options, (profile_defaults or {}).get(submit['name']))
         submit_files.bind_submit(submit, project.root)
         local_inputs = set(project.inputs)
+        if execution_options.get('cm_hier') is not None:
+            local_inputs.add(Path(execution_options['cm_hier']))
         local_inputs.update(submit_files.phase_inputs(submit['resolved_files'], 'compile'))
         runtime_inputs = set()
         if submit["adapter"] == "command":
@@ -261,17 +278,24 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
             [{key: value for key, value in rule.items() if key != 'number'}
              for rule in filter_data['rules'] if rule['phase'] == 'compile'] if filter_data else [])
         if submit['adapter'] == 'command' and not submit.get('compile'):
-            compile_config['prebuilt_argv'] = submit['argv']
+            # Runtime arguments do not change the prebuilt executable identity.
+            compile_config['prebuilt_argv'] = submit['argv'][:1]
+        if submit['adapter'] == 'command' and submit.get('coverage', {}).get('compile_args'):
+            compile_config['coverage_compile_enabled'] = submit['effective_profile']['compile_coverage']
         if submit['adapter'] == 'vcs':
             compile_config['vcs'] = {k: v for k, v in submit['vcs'].items()
-                                     if k not in {'run_args', 'result_argv', 'verdi', 'fsdb', 'fsdb_file', 'fsdb_plusargs'}}
+                                     if k not in {'run_args', 'result_argv', 'verdi', 'fsdb', 'fsdb_file',
+                                                  'fsdb_plusargs', 'coverage', 'coverage_collect_enabled'}}
         submit['build_inputs'] = {str(p): hashes[str(p)] for p in sorted(compile_inputs[index])}
         submit['build_config'] = compile_config
         build_id = hashlib.sha256(encode({'config': compile_config, 'inputs': submit['build_inputs'],
                                          'project_root': str(project.root), 'runtime': tool_identity})).hexdigest()
         for case in dict.fromkeys(cases):
-            resolved = [resolve_case(submit_files.bind_tree(record, submit['files'], project.root, 'simulate'), submit,
-                                     submit_files.bind_tree(list(plusargs), submit['files'], project.root, 'simulate'))
+            from nsim.profiles import runtime_overrides
+            resolved = [runtime_overrides(
+                            resolve_case(submit_files.bind_tree(record, submit['files'], project.root, 'simulate'), submit,
+                                         submit_files.bind_tree(list(plusargs), submit['files'], project.root, 'simulate')),
+                            execution_options.get('sim_args') or (), submit, project.root, case)
                         for record in case_records[case]] if phase != 'com' else [{'argv': [], 'origins': {}}]
             if any(argument_groups(value['argv']) != argument_groups(resolved[0]['argv']) for value in resolved[1:]):
                 sources = ', '.join(record['source'] for record in case_records[case])
@@ -295,8 +319,9 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
     regression = bool(caselists or phase == 'regr' or len(tasks) > 1)
     run_id = new_regression_id(caselists) if regression else uuid.uuid4().hex
     return {"schema_version": project.schema_version, "id": run_id,
-            'execution': {'phase': phase, 'mode': mode, 'workspace': directory,
+        'execution': {'phase': phase, 'mode': mode, 'workspace': directory,
                           'com_dir': com_dir, 'sim_dir': sim_dir,
+                          'options': execution_options,
                           'layout': 'isolated-regression-v1' if regression and phase != 'com' else 'single-v1'},
             'plusargs': list(plusargs),
             'seed_selection': {'source': seed_source, 'repeat': repeat, 'values': seeds},

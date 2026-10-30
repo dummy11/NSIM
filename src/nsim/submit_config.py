@@ -9,7 +9,8 @@ from nsim.config import ConfigError, fields, integer, read_json
 
 SUBMIT_FIELDS = {'schema_version', 'name', 'adapter', 'argv', 'env', 'plusargs', 'required_checks',
                  'timeout_seconds', 'settle_seconds', 'fake', 'vcs', 'scheduler', 'mode', 'compile',
-                 'hooks', 'log_analysis', 'extends', 'case_defaults', 'files'}
+                 'hooks', 'log_analysis', 'extends', 'case_defaults', 'files',
+                 'coverage', 'waveform'}
 
 
 def merge(parent, child, trail=()):

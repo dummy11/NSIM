@@ -48,6 +48,34 @@ class SingleRerunTests(Fixture):
         self.assertEqual(before, {path: digest(path) for path in before})
         self.assertEqual(load_final(second)[0]['source']['scope'], 'case')
 
+    def test_runtime_override_reuses_build_and_compile_override_requires_rebuild(self):
+        self.command_setup()
+        simulator = self.project / 'simulator.py'
+        # The extra argument is accepted by this test wrapper and appears in the saved command.
+        simulator.write_text(simulator.read_text().replace('case, seed, result = sys.argv[1:]\n',
+                                                           'case, seed, result = sys.argv[1:4]\n'))
+        compiler = self.project / 'compiler.py'
+        compiler.write_text(compiler.read_text().replace('map(Path, sys.argv[1:])',
+                                                         'map(Path, sys.argv[1:4])'))
+        original = create_plan(self.project, cases=['smoke'], seeds=[42],
+                               submit_paths=[self.submit], plusargs=['+MODE=old'])
+        record, _ = run(original, [self.out])
+        replayed, state = replay(record, execution_options={'sim_args': ['+WAVE=1'], 'waves': False},
+                                 plusargs=['+MODE=new'])
+        self.assertTrue(state['passed'], state)
+        self.assertEqual(state['phase'], 'sim')
+        self.assertEqual((self.base / 'count').read_text(), 'compile\n')
+        self.assertIn('+WAVE=1', state['tasks'][0]['attempts'][0]['command'])
+        self.assertIn('+MODE=new', state['tasks'][0]['attempts'][0]['command'])
+        self.assertNotIn('+MODE=old', state['tasks'][0]['attempts'][0]['command'])
+        self.assertIs(load_final(replayed)[0]['submits'][0]['effective_profile']['waves'], False)
+        with self.assertRaisesRegex(ConfigError, '--rebuild'):
+            replay(record, execution_options={'compile_args': ['-DTRACE=1']})
+        rebuilt, state = replay(record, rebuild=True, execution_options={'compile_args': ['-DTRACE=1']})
+        self.assertTrue(state['passed'], state)
+        self.assertEqual((self.base / 'count').read_text(), 'compile\ncompile\n')
+        self.assertIn('-DTRACE=1', load_final(rebuilt)[0]['submits'][0]['compile']['argv'])
+
     def test_compile_input_change_requires_explicit_rebuild_before_creating_outputs(self):
         self.command_setup()
         original = self.single()

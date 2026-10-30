@@ -31,6 +31,33 @@ submit 及其父模板均未声明 `mode` 时为 `rtl`。运行时省略 `-mode`
 `regr -rl/--regr-list` 按行执行多个完整回归，每行复用单次参数；批次汇总位于
 `output_root/regr_batch_dir/<batch-id>/report/`。完整目录和规则见 [单次与批量回归](regression_batches.md)。
 
+## 覆盖率、波形和执行参数
+
+| 入口 | 覆盖率默认 | 波形默认 | 编译目录 |
+| --- | --- | --- | --- |
+| `com` | 关闭 | 无仿真阶段 | 固定工作区 `com_dir` |
+| `run --case` | 关闭 | 打开 | 每个 submit 在固定工作区编译一次 |
+| `sim --case` | 关闭 | 打开 | 校验并复用固定工作区已有编译 |
+| `regr -l` 或 `regr -rl` 的每一行 | 打开 | 关闭 | 每轮新回归根内，每个 submit 编译一次 |
+
+`--coverage on/off` 和 `--waves on/off` 显式覆盖相应默认值。`com` 只接受覆盖率选项；
+`sim --coverage on` 要求已有编译包含覆盖率插桩，不能隐式补编译。覆盖率打开时，VCS
+编译和运行分别使用 submit 的 `vcs.coverage.compile_args` 与 `run_args`；关闭时两组均不加入。
+覆盖率编译状态和本次采集状态分别记录，已插桩的编译可配合 `sim --coverage off` 运行。
+波形只控制运行时是否附加 `vcs.fsdb_plusargs`，TB 是否生成波形由其 dump 逻辑和编译条件决定。
+
+`--compile-arg`、`--define`、`--cm-metrics`、`--cm-hier` 可用于 `com/run/regr`；
+`--sim-arg`、`--cm-dir`、`--plusargs` 可用于 `run/sim/regr`。`--coverage`、`--waves`
+和上述阶段参数在 `rerun/recover` 的当前输入重跑中也可使用；整轮 `recover` 保持历史配置，拒绝这些覆盖。
+`--cm-metrics` 替换覆盖率指标，`--cm-hier` 替换覆盖率层次文件，`--cm-dir` 替换运行输出目录；
+这些参数要求同时打开覆盖率。层次文件会作为编译输入登记并校验。
+编译参数追加在 submit 编译参数之后；`--sim-arg` 按选项名覆盖 submit 和 caselist
+中的同名运行参数，`--plusargs` 的同名参数优先级最高。工具对不同选项的解释仍需用命令预览确认。
+VCS 的 `-cm` 参数应写进 `vcs.coverage`，不能通过通用 `--compile-arg/--sim-arg` 传入。
+原生 VCS 当前只支持 `--dry-run` 预览。`command` submit 可声明顶层
+`coverage.compile_args/run_args` 与 `waveform.run_args`；开关控制这些参数是否传给包装器。
+未配置 recipe 时，开关不会自动产生覆盖率或波形；实际产物由包装器负责。
+
 ## 仿真环境根目录链接
 
 nsim 在编译目录和每个 case/seed 仿真目录中自动创建 `env -> <验证工程根目录>`。

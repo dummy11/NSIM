@@ -24,8 +24,14 @@ nsim rerun /data/output/base/rtl/sim_dir/smoke_42 --rebuild
 它读取当前工程和 submit，沿用原 case/seed 与原 CLI plusargs。编译产物缺失、损坏、
 被替换，或与当前编译输入不兼容时，默认报错并提示 `--rebuild`，绝不自动转为编译。
 只有运行阶段输入改变且编译身份仍兼容时，可以不重新编译。
-切换 `vcs.fsdb` 只改变运行参数，本身不要求重新编译；若同时修改 TB 或编译调试选项，
-仍需 `--rebuild`。生成 FSDB 还取决于工程已有的 dump 逻辑与编译配置。
+`--waves on/off` 只改变波形运行参数，本身不要求重新编译；原 case 的有效覆盖率、
+波形和阶段参数默认继承。`--coverage on` 如果需要新增编译插桩，就必须加 `--rebuild`；
+已插桩编译上用 `--coverage off` 可只关闭本次采集。修改 TB、RTL、define、覆盖率层次或
+其他编译选项也必须使用 `--rebuild`。生成 FSDB 仍取决于工程 dump 逻辑与编译配置。
+`--sim-arg`、`--plusargs` 可单独改变仿真；`--compile-arg`、`--define`、
+`--cm-metrics`、`--cm-hier` 改变编译身份，默认复用时会在创建新目录前报错。
+`--sim-arg` 高于 submit/caselist 同名运行参数，`--plusargs` 优先级最高；
+重跑追加的同名 plusarg 替换来源 CLI plusarg。未指定的 profile 开关沿用来源有效值。
 只有预构建产物的 command submit 可以校验复用，但不能使用 `--rebuild`。
 
 复用会在共享读锁下校验原 `build.json` 及产物，再复制到本次独立 `com_dir`，不使用
@@ -36,6 +42,7 @@ nsim rerun /data/output/base/rtl/sim_dir/smoke_42 --rebuild
 并由完成记录校验其归属；旧记录优先使用自身编译计划或所属回归，标准单跑布局也可
 定位唯一匹配的兄弟 case。不能明确归属时拒绝猜测，应使用对应 case_dir 加 `--rebuild`。
 纯编译重跑有独立报告，但不会替代回归汇总中的仿真结果，也不能作为 `report --include` 的来源。
+编译目录入口接受覆盖率和编译参数覆盖，但不接受波形、仿真参数或 plusargs。
 
 所有入口仍要求可校验的终态；未知 LSF 作业、损坏的控制记录不能通过改目录类型绕过。
 单跑 recover 使用与 rerun 相同的当前输入、当前版本选择及编译策略，生成相同的 rerun_ 前缀目录；两者都不接受 seed 或输出根覆盖。历史输入恢复语义仅用于整轮回归。
@@ -68,6 +75,8 @@ nsim rr /data/output/regr_dir/<原回归ID>/<submit>/rtl/sim_dir/<case>_<seed> -
   当前清单新增 case 不会扩大任务范围；失败 case 被删除、submit 被改名或输入丢失会报错。
 - 当前 submit 决定编译/仿真命令、hooks、运行参数与调度配置；默认并发沿用来源，可用
   `--jobs` 修改。稳定启动器使用来源工程当前版本 pin，无 pin 时使用历史版本。
+- 来源命令的有效覆盖率和波形设置沿用；本次 `rerun` 显式的 `--coverage/--waves` 优先。
+  覆盖率参数仍从当前 submit 的独立 recipe 读取。
 - 每个选中的 submit 在本次独立编译目录中强制编译一次，再执行对应 case 的完整流程。
   即使来源是 sim，也重新编译；编译失败时不运行该 submit 的仿真。
 - command submit 必须声明 compile；只有预构建产物时明确报错。fake 仅用于测试，
@@ -109,6 +118,7 @@ parent 指向直接来源任务。原回归及其批次报告不会因为重跑�
 整轮回归重编译时，没有 compile 步骤的 command submit 会报错。
 recover 仍支持输出根和 seed 覆盖。两者都要求来源具有可信终态，不绕过未知 LSF
 作业或损坏控制记录的检查。完整的目录与手动报告汇总规则见 [重跑、恢复与报告](replay_reports.md)。
+整轮 recover 拒绝覆盖率、波形、阶段参数和 plusargs 覆盖，确保历史命令可追溯。
 
 ## 批量回归重跑
 

@@ -75,7 +75,7 @@ class SubmitFileTests(Fixture):
         self.data['files']['data'] = {'path': special.name, 'phases': ['simulate']}
         self.data['case_defaults'] = {'c_test': '{file:data}'}
         self.save_submit()
-        plan = self.plan(allow_missing_tools=True)
+        plan = self.plan(allow_missing_tools=True, execution_options={'coverage': True})
         preview = commands(plan, plan['tasks'][0], self.out)
         self.assertIn(str(self.compile_input), preview['compile']['argv'])
         self.assertIn(str(self.runtime_input), preview['simulate'])

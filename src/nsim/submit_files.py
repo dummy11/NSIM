@@ -194,6 +194,11 @@ def bind_submit(submit, root):
     submit['case_defaults'] = bind_tree(submit.get('case_defaults', {}), declarations, root, 'simulate')
     if submit.get('compile'):
         args(submit['compile'], 'argv', 'compile', executable=True)
+    if submit.get('coverage'):
+        args(submit['coverage'], 'compile_args', 'compile')
+        args(submit['coverage'], 'run_args', 'simulate')
+    if submit.get('waveform'):
+        args(submit['waveform'], 'run_args', 'simulate')
     for stage, hooks in submit.get('hooks', {}).items():
         phase = 'compile' if stage.endswith('compile') else 'analysis' if stage == 'post_sim' else 'simulate'
         for hook in hooks:
@@ -201,6 +206,9 @@ def bind_submit(submit, root):
     vcs = submit.get('vcs', {})
     args(vcs, 'compile_args', 'compile')
     args(vcs, 'run_args', 'simulate')
+    if vcs.get('coverage'):
+        args(vcs['coverage'], 'compile_args', 'compile')
+        args(vcs['coverage'], 'run_args', 'simulate')
     args(vcs, 'fsdb_plusargs', 'simulate')
     args(vcs, 'result_argv', 'analysis', executable=True)
     if vcs.get('dpi'):

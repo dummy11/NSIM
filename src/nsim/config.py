@@ -269,6 +269,16 @@ def load_submit(path: Path, source_bytes=None, *, file_contents=None, project_ro
             raise ConfigError("required golden check needs explicit vcs.golden_enabled=true")
     elif "vcs" in data:
         raise ConfigError("vcs settings require the vcs adapter")
+    if 'coverage' in data or 'waveform' in data:
+        if data['adapter'] != 'command':
+            raise ConfigError('top-level coverage/waveform recipes require the command adapter')
+        if 'coverage' in data:
+            fields(data['coverage'], {'compile_args', 'run_args'}, set(), 'coverage')
+            result['coverage'] = {key: strings(data['coverage'].get(key, []), 'coverage.' + key)
+                                  for key in ('compile_args', 'run_args')}
+        if 'waveform' in data:
+            fields(data['waveform'], {'run_args'}, set(), 'waveform')
+            result['waveform'] = {'run_args': strings(data['waveform'].get('run_args', []), 'waveform.run_args')}
     from nsim.submit_files import validate_references
     validate_references(result)
     return result

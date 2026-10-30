@@ -419,7 +419,8 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
                 dashboard.close()
 
 
-def replay(source, roots=None, recovery=False, seed=None, output_dir=None, rebuild=False, **overrides):
+def replay(source, roots=None, recovery=False, seed=None, output_dir=None, rebuild=False,
+           execution_options=None, plusargs=(), **overrides):
     source = Path(source).resolve()
     from nsim.compile_replay import load_compile_source
     compile_source = (source / 'build.json').is_file()
@@ -427,8 +428,10 @@ def replay(source, roots=None, recovery=False, seed=None, output_dir=None, rebui
     if original.get('kind') == 'batch':
         from nsim.batch_replay import replay_batch
         return replay_batch(source, original, state, roots=roots, recovery=recovery, seed=seed,
-                            output_dir=output_dir, rebuild=rebuild, **overrides)
-    prepared = prepare_replay(source, original, state, roots, recovery, seed, output_dir, rebuild, **overrides)
+                            output_dir=output_dir, rebuild=rebuild, execution_options=execution_options,
+                            plusargs=plusargs, **overrides)
+    prepared = prepare_replay(source, original, state, roots, recovery, seed, output_dir, rebuild,
+                              execution_options=execution_options, plusargs=plusargs, **overrides)
     if prepared is None:
         return None, {'passed': state['passed'], 'message': 'no matching failed tasks', 'tasks': []}
     plan, roots, settings = prepared
@@ -436,18 +439,24 @@ def replay(source, roots=None, recovery=False, seed=None, output_dir=None, rebui
 
 
 def prepare_replay(source, original, state, roots=None, recovery=False, seed=None,
-                   output_dir=None, rebuild=False, **overrides):
+                   output_dir=None, rebuild=False, execution_options=None, plusargs=(), **overrides):
     """Prepare without executing so a batch can validate every child first."""
     from nsim.compile_replay import prepare_compile_rerun
     from nsim.single_replay import case_source
     compile_source = (Path(source) / 'build.json').is_file()
+    from nsim.profiles import changed
+    if recovery and not compile_source and not case_source(original) and changed(execution_options, plusargs):
+        raise ConfigError('whole-regression recover preserves historical execution options')
+    if (compile_source or original['execution']['phase'] == 'com') and plusargs:
+        raise ConfigError('compile directory replay does not accept simulation plusargs')
     if not recovery or compile_source or case_source(original) or original['execution']['phase'] == 'com':
         from nsim.rerun import prepare_rerun
         if seed is not None or roots is not None:
             raise ConfigError('rerun preserves case/seed and the original output root; overrides are not supported')
-        prepared = (prepare_compile_rerun(source, original, state, output_dir)
+        prepared = (prepare_compile_rerun(source, original, state, output_dir, execution_options)
                     if compile_source or original['execution']['phase'] == 'com' else
-                    prepare_rerun(source, original, state, output_dir=output_dir, rebuild=rebuild))
+                    prepare_rerun(source, original, state, output_dir=output_dir, rebuild=rebuild,
+                                  execution_options=execution_options, extra_plusargs=plusargs))
         if prepared is None:
             return None
         plan, roots = prepared

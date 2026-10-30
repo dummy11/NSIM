@@ -6,6 +6,15 @@
 
 ## 阅读入口
 
+日常配置和执行按四个主题阅读；安装、项目注册和完整命令表仍保留在本指南及参考页。
+
+| 主题 | 主文档 | 包含的内容 |
+| --- | --- | --- |
+| Submit 语法和用法 | [Submit 语法](docs/submit.md) | 公共模板、继承、适配器、文件引用、覆盖率和波形参数组、示例 |
+| Caselist 语法和用法 | [Caselist 语法](docs/caselist.md) | `@defaults`、行参数、case.yaml、自定义映射、优先级和预览 |
+| 独立单跑 | [独立单跑](docs/single_run.md) | `com/run/sim` 的选项、默认值、目录、submit/CLI 优先级及 `case_dir/com_dir` 重跑 |
+| 回归 | [回归流程](docs/regression_workflow.md) | `regr -l/-rl` 的选项、目录、参数优先级，以及 `inspect/release/rerun/recover` |
+
 | 要做的事 | 从这里开始 |
 | --- | --- |
 | 查全部子命令、选项或常用简写 | [完整命令清单](docs/cli_reference.md)、[常用命令简版](docs/cli_quickstart.md) |
@@ -14,7 +23,8 @@
 | 初始化、登记和维护验证项目 | [项目初始化](#项目初始化与注册)、[查看与更新](#查看与更新当前项目)、[选择版本](#工程如何选择版本) |
 | 配置输入、输出和 submit | [路径规则](#配置文件与路径规则)、[默认输出目录](#一次配置输出目录日常运行自动读取)、[Submit 语法](docs/submit.md) |
 | 编写逻辑用例、seq/C 测试和自定义运行参数 | [Caselist 语法与示例](docs/caselist.md) |
-| 编译、单跑和回归 | [执行阶段](docs/execution_stages.md)、[LSF 与 local](docs/lsf_execution.md) |
+| 编译与独立单跑 | [独立单跑](docs/single_run.md)、[执行阶段细节](docs/execution_stages.md) |
+| 单次与批量回归 | [回归流程](docs/regression_workflow.md)、[批量清单与目录细节](docs/regression_batches.md) |
 | 接入工程命令与结果检查 | [执行协议](docs/local_execution.md)、[Hooks 与日志分析](docs/hooks_and_log_analysis.md) |
 | 查看进度、报告、重跑与恢复 | [终端 Dashboard](docs/dashboard.md)、[报告与重跑](#检查报告重跑和恢复) |
 | 回归结束后如何 inspect、release、rerun、recover | [回归收尾流程与场景示例](docs/post_regression_workflow.md) |
@@ -521,7 +531,9 @@ nsim storage check /tmp/nsim-output --min-free-bytes 104857600
 
 rerun 为当前输入建立新的 hash 和配置快照，不要求与历史输入相同；本次执行前后仍检查输入一致性。整轮回归 recover 要求历史输入和运行时可验证。两者都拒绝损坏的控制记录和未确认终态的来源，不自动重叠派发状态未知的旧任务。
 
-自动故障转移通过 `--retries`（默认 1）和 `--retry-seconds`（默认 120）限制。检测到存储 I/O 失败后，该输出根在本次运行内被隔离；新 attempt 可以使用尚未隔离的备用根。没有健康位置时保留失败，不盲目重复写故障盘。功能 FAIL 不自动重试。
+自动故障转移和基础设施重试已停用；`--retries`、`--retry-seconds` 只保留兼容入口，
+必须为 0。每次执行选择一个输出根，出现存储或作业异常时保留证据，之后按来源记录
+使用 `rerun/recover` 或新建运行；具体边界见 [回归流程](docs/regression_workflow.md)。
 
 ## 历史回归与身份
 

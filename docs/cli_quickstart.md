@@ -1,6 +1,8 @@
 # nsim 常用命令简版
 
 全部子命令、默认值、互斥关系和高级选项见 [完整命令清单](cli_reference.md)。本页使用正式简写，所有原命令和长选项继续支持。稳定启动器需使用包含简写支持的新版脚本。
+按任务查阅可从 [Submit 语法](submit.md)、[Caselist 语法](caselist.md)、
+[独立单跑](single_run.md)和[回归流程](regression_workflow.md)四个主入口开始。
 
 ## 日常只记这几个
 

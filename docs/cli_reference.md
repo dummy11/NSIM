@@ -183,8 +183,8 @@
 
 | 选项 | com | sim / run | regr | 含义 |
 | --- | --- | --- | --- | --- |
-| `--case CASE` | 不支持 | 与 `-l` 二选一，必须选一种 | 不支持 | 一个逻辑用例名 |
-| `-l / --caselist FILE...` | 不支持 | 与 `--case` 二选一 | 与 `-rl` 二选一 | 一个或多个用例清单；可重复 |
+| `--case CASE...` | 不支持 | 必填，可指定多个 | 不支持 | 一个或多个独立单跑的逻辑用例名 |
+| `-l / --caselist FILE...` | 不支持 | 不支持 | 与 `-rl` 二选一 | 一个或多个回归用例清单；可重复 |
 | `-seed / --seed N...` | 不支持 | 可选 | 可选 | 一个或多个固定 seed；可重复 |
 | `-repeat N` | 不支持 | 不支持 | 可选 | 生成 N 个不同随机 seed，与 `-seed` 互斥 |
 | `-rl / --regr-list FILE` | 不支持 | 不支持 | 与 `-l` 二选一 | 批量回归列表，每行是一组 regr 参数 |
@@ -194,7 +194,7 @@
 
 seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 seed，保存到计划。回归任务按去重后的 case × submit × seed 展开。
 
-### 四个执行命令共用的全部选项
+### 执行命令选项（按阶段适用）
 
 | 选项及已有别名 | 默认值 | 含义 |
 | --- | --- | --- |
@@ -216,7 +216,7 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 | `--resource EXPR` | submit 配置 | 覆盖 LSF 资源表达式列表；可重复 |
 | `--license RESOURCE=COUNT` | submit 配置 | 覆盖 LSF license 资源配置；可重复，COUNT 为正整数 |
 | `--coverage on/off` | run/sim/com 关闭，regr 打开 | 显式控制覆盖率插桩与采集；sim 只控制采集，要求已有匹配编译 |
-| `--waves on/off` | run/sim 打开，regr 关闭 | 显式控制 VCS 波形 plusargs；com 无此参数 |
+| `--waves on/off` | run/sim 打开，regr 关闭 | 显式控制 VCS/command 的波形参数组；com 无此参数 |
 | `--compile-arg VALUE` | 空 | 追加编译参数；com/run/regr 可用，前导 `-` 用 `--compile-arg=VALUE` |
 | `--sim-arg VALUE` | 空 | 追加仿真参数；run/sim/regr 可用，前导 `-` 用 `--sim-arg=VALUE` |
 | `--define NAME[=VALUE]` | 空 | 追加 VCS 编译 define；com/run/regr 可用 |
@@ -238,7 +238,7 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 
 `SOURCE` 使用执行命令返回的 `record_dir`，也可使用带有效运行记录的仿真目录。
 
-| 命令 | 全部选项 | 默认行为 |
+| 命令 | 常用选项 | 默认行为 |
 | --- | --- | --- |
 | `rerun SOURCE` | `--rebuild / -rebuild`、`-dir / --dir NAME`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | com_dir 只重编译；case_dir 默认复用，加 --rebuild 才重编译；整轮回归重编译失败任务 |
 | `recover SOURCE` | `--rebuild / -rebuild`、`-dir / --dir NAME`、`-o / --output-root PATH`、`-seed / --seed N`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | 单跑与 rerun 等价；单次/批量回归恢复不完整任务，使用历史输入重编译 |

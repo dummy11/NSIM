@@ -1,6 +1,6 @@
 # nsim 编译、仿真与工作区
 
-执行入口为 `nsim com`、`nsim sim`、`nsim run`、`nsim regr`。`com` 只编译或登记预构建输入；`sim` 只使用已有且校验通过的编译产物；`run` 先编译，成功后仿真并检查结果。单个 case 使用 `--case`，回归使用 `regr -l`；run/sim 也接受 `-l`（`--caselist`）。case 与 caselist 选择互斥。`com` 不接收 case、caselist 或 seed。旧的两级执行入口已删除。
+执行入口为 `nsim com`、`nsim sim`、`nsim run`、`nsim regr`。`com` 只编译或登记预构建输入；`sim` 只使用已有且校验通过的编译产物；`run` 先编译，成功后仿真并检查结果。`run/sim --case` 可列出多个显式 case，`-sub` 可列出多个 submit；每个 case/submit/seed 组合都是独立单跑。它们不接受 `-l`。读取 caselist、建立回归目录和汇总使用 `regr -l`。`com` 不接收 case、caselist 或 seed。旧的两级执行入口已删除。
 
 ## 参数和目录
 
@@ -11,9 +11,10 @@
 | `-com-dir` | `com_dir` | 编译目录路径；相对路径以当前工作区为基准，也接受绝对路径 |
 | `-sim-dir` | `sim_dir` | 仿真父目录；相对工作区解析，也接受绝对路径，下面仍按 case_seed 分目录 |
 | `-o` / `--output-root` | 项目登记的唯一输出根 | 本次选定一个输出根，不修改项目设置；项目登记多个根时必须显式选择 |
-| `-l` / `--caselist` | 必须选择 case 或 caselist | 一个或多个 caselist 文件；单次 regr 使用此选项，批量入口使用 -rl |
+| `--case` / `-c` | run/sim 必填 | 一个或多个显式 case；每个组合独立单跑 |
+| `-l` / `--caselist` | regr 必填，或用 -rl | 一个或多个 caselist 文件；仅 regr 接受 |
 | `-sub` / `--submit` | 必填 | 一个或多个 submit 名称或文件路径 |
-| `-seed` / `--seed` | 随机生成一个 seed | 一个或多个正整数 seed，重复值去重 |
+| `-seed` / `--seed` | 随机生成一个 seed | 一个或多个正整数 seed；run/sim 将每个组合独立执行，regr 将它们纳入回归 |
 | `-scheduler` / `--scheduler` | submit 配置，未指定为 `lsf` | 选择 `lsf` 或 `local` |
 | `-jobs` / `--jobs` / `-j` | `1` | 本次调用最多 N 个未结束作业，完成后补位 |
 | `-queue` / `--queue` / `-q` | submit 配置或集群默认 | LSF 队列 |
@@ -144,11 +145,11 @@ submit 可增加 `compile` 对象：
 
 ## 覆盖、锁与重跑
 
-`com`、单跑 `run` 在固定工作区重新编译；回归 `run/regr` 在新的独立目录编译，保留历史结果。`sim` 校验已有成功记录、模式、submit 编译配置、声明输入、工具及产物内容；单跑通过后才准备原仿真目录，回归 sim 则复制已验证编译到自己的目录，再启动仿真。case、seed、caselist、`-dir` 和仿真 plusargs 不参与编译身份；源码和编译选项变化要求重新编译。
+`com`、`run` 在固定工作区编译；一次 `run --case` 展开出多个组合时，每个 submit 只编译一次，各 case/seed 独立保存在固定目录。`regr` 在新的独立回归目录编译，保留历史结果。`sim --case` 校验已有成功编译并直接复用；多个显式组合仍各自保存单跑记录。case、seed、caselist、`-dir` 和仿真 plusargs 不参与编译身份；源码和编译选项变化要求重新编译。
 
 编译写入持有独占锁，仿真消费编译产物持有共享锁。多个 `sim` 可以复用同一编译目录，但不能在其运行期间重新编译。同一 case/seed 输出目录持有独占锁；不同 case/seed 或工作区可并发。local 锁由子进程继承；新 LSF 仿真使用 `run.json.lsf` 保护自己的目录，编译目录仍保留对应的 `.lsf-readers/<token>.json`。编译 job 和旧记录继续使用原有占用标记。控制器意外退出时仍阻止覆盖活动产物，可通过 `nsim lsf inspect/release` 检查和安全释放，见 [LSF 执行](lsf_execution.md#检查与安全释放)。
 
-独立回归在启动时校验全部路径并建立回归根、report 和共享编译目录；case 目录在取得 `--jobs` 名额、通过编译准备后逐个创建并加锁。未派发的 case 不创建空目录，单 case 创建失败不停止其他 case。旧共享布局与单跑保留原有预先加锁规则。
+独立回归在启动时校验全部路径并建立回归根、report 和共享编译目录；case 目录在取得 `--jobs` 名额、通过编译准备后逐个创建并加锁。未派发的 case 不创建空目录，单 case 创建失败不停止其他 case。`run/sim --case` 的多个组合不建回归根或汇总，每个组合分别持有自己的单跑记录；同一 submit 内逐个执行，不同 submit 最多并行 `--jobs` 个。
 
 相同工作区、case、seed 串行覆盖旧日志、结果和波形。单次仿真仅保留最新计划、终态及证据；单个 com 的阶段记录在编译目录中。批量运行保留 `regr_dir` 的历史计划与汇总。重新编译或覆盖仿真产物后，引用旧产物的历史通过证据会变为 `INCOMPLETE`。
 
@@ -172,4 +173,4 @@ submit 可增加 `compile` 对象：
 
 `report`、`rerun`、`recover` 使用返回的 `record_dir`，不需要 event-root。`rerun` 固定完整执行但结果失败的 case/seed，重新读取当前工程登记、源码、submit、caselist/YAML 与输入文件，不要求它们匹配历史 hash。每次在来源回归下建立独立 `rerun_<时间_UUID>/report/`、编译和仿真目录；每个 submit 强制编译一次，再运行对应失败 case，包括原先由 sim 产生的任务。原产物与报告保留，详见 [重跑、恢复与报告](replay_reports.md)。`recover` 校验历史输入，在新的独立目录强制编译、仿真和检查；来源为 sim 时也不复用原编译产物。com_dir 来源只重新编译，不执行仿真。
 
-`--dry-run` 只写独立预览记录，不写编译成功记录，不清理编译或仿真产物。com 预览仅含编译；sim 预览仅含仿真；run/regr 包含两阶段。预览成功不代表所引用编译产物存在或真实 EDA/farm 作业可运行。
+`--dry-run` 只写独立预览记录，不写编译成功记录，不清理编译或仿真产物。单跑预览放在 `preview_dir/<id>/report/`，回归预览放在 `regr_dir/<id>/report/`。com 预览仅含编译；sim 预览仅含仿真；run/regr 包含两阶段。预览成功不代表所引用编译产物存在或真实 EDA/farm 作业可运行。

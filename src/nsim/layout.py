@@ -110,6 +110,7 @@ def validate_layout(plan, roots):
     protected = [Path(plan['project']['root']), Path(__file__).resolve().parent,
                  *[Path(s['root']) for s in plan['project'].get('sources', {}).values()],
                  *[Path(p) for p in plan['input_hashes']],
+                 *[root / 'preview_dir' for root in roots],
                  *[root / 'regr_batch_dir' for root in roots]]
     from nsim.submit_files import protected_paths
     protected += [Path(path) for submit in plan['submits']

@@ -74,7 +74,7 @@ class Builds:
         return self.entries[build_directory(root, self.plan, task)][0].fileno()
 
     def snapshot_reused_build(self, root, task, build, policy):
-        """Keep sim -l compatible without sharing a mutable single-run build.
+        """Keep historical sim regressions and case replay off mutable builds.
 
         Validate under a shared lock, copy bytes (never hardlinks), and bind all
         build evidence to the private snapshot. No compiler or compile hook runs.

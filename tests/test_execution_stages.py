@@ -14,6 +14,7 @@ from nsim.compilation import Builds
 from nsim.config import ConfigError, MODES
 from nsim.layout import build_directory, simulation_directory
 from nsim.planning import create_plan
+from nsim.reports import load_final
 from nsim.service import replay, run
 from nsim.storage import digest
 
@@ -214,11 +215,35 @@ shutil.copyfile(source, target)
         self.assertIsNone(parser.parse_args(['sim', *common, '--case', 'smoke']).mode)
         for args in (['run', 'case', *common, '--case', 'smoke'],
                      ['run', 'regression', *common, '--caselist', str(self.cases)],
+                     ['run', *common, '--caselist', str(self.cases)],
+                     ['sim', *common, '--caselist', str(self.cases)],
                      ['run', *common, '--case', 'smoke', '-mode', 'post'],
                      ['com', *common, '--case', 'smoke']):
             with patch('sys.stderr'), self.assertRaises(SystemExit) as exc:
                 parser.parse_args(args)
             self.assertEqual(exc.exception.code, 2)
+
+    def test_run_and_sim_multiple_explicit_cases_remain_independent(self):
+        self.command_submit()
+        other = self.project / 'other.json'
+        other.write_text(json.dumps(dict(self.data, name='other')))
+        options = ['--project', str(self.project), '--submit', str(self.submit), str(other),
+                   '--case', 'smoke', 'fast', '--seed', '42', '43', '--output-root', str(self.out)]
+        for stage in ('run', 'sim'):
+            result = subprocess.run([sys.executable, '-m', 'nsim', stage, *options],
+                                    cwd=self.backup, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            response = json.loads(result.stdout)
+            self.assertEqual(response['tasks'], 8)
+            self.assertEqual(len(response['runs']), 8)
+            self.assertIsNone(response['record_dir'])
+            self.assertFalse((self.out / 'regr_dir').exists())
+            for item in response['runs']:
+                case_plan, case_state = load_final(Path(item['record_dir']))
+                self.assertEqual(case_plan['kind'], 'case')
+                self.assertEqual(len(case_plan['tasks']), 1)
+                self.assertTrue(case_state['passed'])
+        self.assertEqual((self.base / 'count').read_text(), 'compile\ncompile\n')
 
     def test_cli_works_outside_project_and_resolves_com_dir_from_workspace(self):
         common = [sys.executable, '-m', 'nsim']

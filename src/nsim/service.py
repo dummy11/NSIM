@@ -60,6 +60,56 @@ def run(plan, roots, jobs=1, retries=0, retry_seconds=0,
                     min_free_bytes, min_free_inodes, dry_run, on_progress)
 
 
+def run_singles(plan, roots, jobs=1, retries=0, retry_seconds=0,
+                min_free_bytes=0, min_free_inodes=0, dry_run=False):
+    """Run explicit case selections as independent case records, not a regression."""
+    if plan['execution']['phase'] not in ('run', 'sim') or plan['caselists']:
+        raise ConfigError('independent case selection requires run/sim --case')
+    integer(jobs, 'jobs', 1)
+    roots = validate_roots(plan, roots)
+    validate_layout(plan, roots)
+
+    def one(task):
+        selected = copy.deepcopy(plan)
+        selected['id'] = uuid.uuid4().hex
+        selected['kind'] = 'case'
+        selected['execution']['layout'] = 'single-v1'
+        selected['tasks'] = [copy.deepcopy(task)]
+        selected['seed_selection']['values'] = [task['seed']]
+        selected['case_definitions'] = {task['case']: selected['case_definitions'][task['case']]}
+        return selected
+
+    def execute_submit(tasks):
+        first = one(tasks[0])
+        results = []
+        with SimulationDirectories(first, min_free_bytes, min_free_inodes) as directories, Builds(first) as builds:
+            for task in tasks:
+                selected = one(task)
+                record, state = _run(selected, roots, directories, builds, 1, retries, retry_seconds,
+                                     min_free_bytes, min_free_inodes, dry_run)
+                results.append((task['id'], record, state))
+        return results
+
+    groups = [[task for task in plan['tasks'] if task['submit'] == index]
+              for index in dict.fromkeys(task['submit'] for task in plan['tasks'])]
+    with ThreadPoolExecutor(max_workers=min(jobs, len(groups))) as executor:
+        grouped = [executor.submit(execute_submit, tasks) for tasks in groups]
+        completed = {task_id: (record, state) for future in grouped
+                     for task_id, record, state in future.result()}
+    ordered = [(task['id'], *completed[task['id']]) for task in plan['tasks']]
+    return None, dict(phase=plan['execution']['phase'], dry_run=dry_run,
+                      passed=all(state['passed'] for _, _, state in ordered),
+                      task_count=len(ordered),
+                      report_errors=[error for _, _, state in ordered for error in state.get('report_errors', [])],
+                      scheduler_errors=[error for _, _, state in ordered for error in state.get('scheduler_errors', [])],
+                      runs=[{'case': task['case'], 'seed': task['seed'],
+                             'submit': plan['submits'][task['submit']]['name'],
+                             'record_dir': str(completed[task['id']][0]),
+                             'passed': completed[task['id']][1]['passed']}
+                            for task in plan['tasks']],
+                      tasks=[state['tasks'][0] for _, _, state in ordered])
+
+
 def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
          min_free_bytes, min_free_inodes, dry_run, on_progress=None):
     integer(jobs, "jobs", 1)
@@ -87,7 +137,8 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
     plan = copy.deepcopy(plan)
     journal = None
     if dry_run or is_regression(plan):
-        execution_root = regression_directory(record_root, plan)
+        execution_root = (record_root / 'preview_dir' / plan['id']
+                          if dry_run and not is_regression(plan) else regression_directory(record_root, plan))
         # Claim the execution namespace before creating any compile/simulation
         # directories. Never silently adopt an old or another controller's run.
         make_directory(execution_root.parent, record_root)

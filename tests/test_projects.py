@@ -139,7 +139,7 @@ class ProjectTests(unittest.TestCase):
         cases.write_text('smoke\n')
         for name in ('output', 'backup', 'override-output', 'override-backup'):
             (self.base / name).mkdir()
-        args = ('run', '--project', 'verification', '--caselist', cases,
+        args = ('regr', '--project', 'verification', '--caselist', cases,
                 '--submit', submit, '--seed', '42')
         # Project defaults win over stale shell values, and paths remain project-relative
         # even though the launcher is called from outside the verification directory.

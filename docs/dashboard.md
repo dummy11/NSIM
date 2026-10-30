@@ -17,7 +17,7 @@ smoke  rtl  seed=42  FAIL  E/F=1/0  tb/checker.sv:27  data mismatch
 ...
 ```
 
-`regr` 即使只选一个 case，也提供 Dashboard；`run` 使用 caselist 或多个 submit/seed 时同样提供。真正的单跑只保存 case 分析和执行记录，不显示回归面板。`--dry-run` 不创建 Dashboard。
+`regr` 即使只选一个 case，也提供 Dashboard。`run/sim --case` 即使指定多个 case/submit/seed，仍分别保存单跑记录，不显示回归面板。`--dry-run` 不创建 Dashboard。
 
 ## 更新流程
 

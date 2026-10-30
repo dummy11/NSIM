@@ -11,11 +11,16 @@ from nsim import get_version
 from nsim.cli_aliases import add_argument, add_command
 from nsim.config import MODES, ConfigError, discover, load_project
 from nsim.planning import create_plan
-from nsim.service import replay, run
+from nsim.service import replay, run, run_singles
 from nsim.storage import IntegrityError, preflight
 from nsim.lsf import LsfError
 from nsim.project_paths import ProjectError, resolve_root
 from nsim import projects as project_admin
+
+
+class _RegressionOnly(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        raise argparse.ArgumentError(self, 'run/sim accept only --case; use regr -l for caselists')
 
 
 def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -47,12 +52,15 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
         execute = add_command(commands, stage, help=description)
         add_argument(execute, "--project", type=Path, help='Project name/path; default: discover from current directory')
         if stage != 'com':
-            selection = execute.add_mutually_exclusive_group(required=True)
-            if stage != 'regr':
-                add_argument(selection, '--case')
-            add_argument(selection, '-l', '--caselist', action='extend', nargs='+', type=Path)
             if stage == 'regr':
+                selection = execute.add_mutually_exclusive_group(required=True)
+                add_argument(selection, '-l', '--caselist', action='extend', nargs='+', type=Path)
                 add_argument(selection, '-rl', '--regr-list', type=Path, help='Batch list: one regr argument list per line')
+            else:
+                add_argument(execute, '--case', action='extend', nargs='+', required=True,
+                             help='One or more explicit cases; use regr -l for a caselist')
+                add_argument(execute, '-l', '--caselist', action=_RegressionOnly, nargs='+',
+                             help=argparse.SUPPRESS)
             add_argument(execute, '--plusargs', action='extend', nargs='+', default=[],
                                  help='Final runtime +KEY overrides, shared with regression-list rows')
             seeds = execute.add_mutually_exclusive_group()
@@ -125,7 +133,7 @@ def resolve_submits(root, values):
 
 def prepare_execution(args):
     if not args.submit:
-        raise ConfigError('one or more -sub/--submit values are required for a single regression')
+        raise ConfigError('one or more -sub/--submit values are required')
     overrides = {k: v for k, v in {'kind': args.scheduler, 'queue': args.queue, 'resources': args.resource}.items() if v is not None}
     if args.license is not None:
         try:
@@ -134,12 +142,15 @@ def prepare_execution(args):
             raise ConfigError('--license requires resource=positive-integer') from exc
     root = resolve_root(args.project)
     plan = create_plan(root, caselist=getattr(args, "caselist", None),
-                       cases=[args.case] if getattr(args, 'case', None) else None,
+                       cases=getattr(args, 'case', None),
                        submit_paths=resolve_submits(root, args.submit), seeds=getattr(args, 'seed', None),
                        allow_missing_tools=args.dry_run, scheduler_overrides=overrides,
                        phase=args.command, mode=args.mode, directory=args.dir,
                        com_dir=args.com_dir, sim_dir=args.sim_dir, repeat=getattr(args, 'repeat', None),
                        plusargs=getattr(args, 'plusargs', []))
+    if args.command in ('run', 'sim'):
+        # Explicit selections remain independent single runs even when expanded.
+        plan['execution']['layout'] = 'single-v1'
     defaults = plan['project'].get('storage_defaults', {})
     roots = args.output_root or args.global_output_root or defaults.get('output_roots') or (
         [os.environ['NSIM_OUTPUT_ROOT']] if os.environ.get('NSIM_OUTPUT_ROOT') else None)
@@ -207,7 +218,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 journal, state = run_batch(batch, entries)
             else:
                 plan, roots, settings = prepare_execution(args)
-                journal, state = run(plan, roots, **settings)
+                if args.command in ('run', 'sim') and len(plan['tasks']) > 1:
+                    journal, state = run_singles(plan, roots, **settings)
+                else:
+                    journal, state = run(plan, roots, **settings)
         elif args.command in ("rerun", "recover"):
             journal, state = replay(args.source, roots=getattr(args, 'output_root', None) or args.global_output_root,
                                     recovery=args.command == "recover", seed=getattr(args, 'seed', None), jobs=args.jobs,
@@ -220,7 +234,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                           'phase': state.get('phase', args.command),
                           "journal": str(journal) if journal else None,
                           "passed": state["passed"], "tasks": state.get("task_count", len(state.get("tasks", []))),
-                          "dry_run": state.get("dry_run", False), "message": state.get("message")}, indent=2))
+                          "dry_run": state.get("dry_run", False), "message": state.get("message"),
+                          **({'runs': state['runs']} if 'runs' in state else {})}, indent=2))
         if state.get("dry_run"):
             return 0
         return 0 if state["passed"] else 2 if state.get("report_errors") or state.get('scheduler_errors') else 1

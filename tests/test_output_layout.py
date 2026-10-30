@@ -129,7 +129,7 @@ class OutputLayoutTests(Fixture):
         before = {str(p): digest(p) for p in directory.rglob('*') if p.is_file()}
         preview, state = run(create_plan(self.project, cases=['smoke'], submit_paths=[self.submit], seeds=[42]),
                              [self.out], dry_run=True)
-        self.assertEqual(preview.parent.parent, self.out / 'regr_dir')
+        self.assertEqual(preview.parent.parent, self.out / 'preview_dir')
         self.assertTrue(state['dry_run'])
         self.assertEqual(before, {str(p): digest(p) for p in directory.rglob('*') if p.is_file()})
         self.assertTrue(load_final(directory)[1]['passed'])

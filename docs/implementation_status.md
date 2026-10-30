@@ -151,6 +151,8 @@ Dashboard 按变更任务维护摘要，完成事件直接更新终端面板；l
 
 ## 2026-10-28 当前输出布局
 
+2026-10-30 更新：`run/sim` 的 CLI 只接受显式 `--case`，多个 case/submit/seed 组合分别作为单跑，保存在固定 case_dir，不建回归根或汇总；`-l` 只属于 `regr`。下段保留 2026-10-28 当时的实现记录。
+
 新运行使用 `output/<submit_name>/<workspace>/com_dir` 与 `sim_dir/<case_name>_<seed>`，批次记录和汇总放在 `output/regr_dir/<batch-id>`。独立 event-root 参数、环境变量入口和新项目配置字段已移除；旧配置字段仅兼容读取并忽略，输出配置 update 时移除。旧 event-root 文件不迁移、不删除；重新执行的 case/seed 目录直接清理并覆盖，不保留内部运行子目录。
 
 单跑保存最新的计划、运行引用、结果和完成校验，不生成实时 HTML 或回归汇总；多个 submit/seed 按批次处理。report/rerun/recover 可从单次仿真目录定位经过校验的批次任务。输出记录写入失败即停止，不承诺输出盘丢失后的独立恢复。LSF 已支持实际提交、状态跟踪与取消；原生 VCS 仍仅支持 dry-run，command 支持显式 compile 步骤；fake 和预构建输入登记均以 compiled=false 区分。执行入口现为 com/sim/run/regr，统一支持 -mode/-dir/-com-dir/-sim-dir/-o；regr 支持多 caselist、多 submit、多 seed，以及与显式 seed 互斥的 -repeat 随机 seed 数量，旧两级入口已删除。详细规则见 [执行阶段](execution_stages.md)。下文日期明确的验收记录描述各次验收时的布局和范围。

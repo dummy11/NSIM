@@ -441,6 +441,7 @@ output/
 │   └── submit_name/<workspace>/
 │       ├── com_dir/
 │       └── sim_dir/<case>_<seed>/
+├── preview_dir/<preview-id>/report/  # 单跑 dry-run 预览
 └── regr_batch_dir/<batch-id>/report/ # 批次清单、状态、Dashboard 和总报告
 ```
 
@@ -455,7 +456,7 @@ output/
 
 sim_dir 直接按 case 名与 seed 分组；同一组合覆盖旧产物，不创建运行 ID 或 attempt 子目录。编译身份保存在 build.json，不再创建 build-id 子目录。com/run 重建编译，sim 只读取成功且兼容的已有编译。编译持有独占锁，运行期间持有编译共享锁；活动仿真目录拒绝覆盖。
 
-真正的单跑（一个 case × submit × seed）直接把计划、终态及完成校验保存在仿真目录，不生成实时 HTML 或回归汇总；单个 com 的阶段记录在编译目录。使用 caselist 或多个 submit/seed 时，该次回归的记录和产物均隔离在 regr_dir/<id>/，汇总文件位于 report/。
+`run/sim --case` 可列多个显式 case，`-sub` 可列多个 submit，`-seed` 可列多个 seed；每个组合都是独立单跑，分别把计划、终态及完成校验保存在自己的仿真目录，不生成实时 HTML 或回归汇总。`run` 在同一次调用内对每个 submit 编译一次；`sim` 直接复用已有编译。多组合命令返回 `runs` 列表，其中逐项给出 `record_dir` 和结果。单个 com 的阶段记录在编译目录。caselist 只通过 `regr -l` 执行；回归记录和产物隔离在 regr_dir/<id>/，汇总文件位于 report/。
 
 `report`、`rerun`、`recover` 接受命令返回的 record_dir，也接受回归中 sim_dir 下具体的 case_dir；后者通过校验过的 run.json 选择单个任务。单跑 rerun/recover 固定 case/seed，默认校验复用原编译，显式 --rebuild 才重新编译；整轮 rerun 强制重新编译。结果存入原回归下独立的 rerun_<时间_UUID>/，保留原产物和报告。单跑来源则在原工作区的同名规则目录下保存独立结果。
 
@@ -463,7 +464,7 @@ sim_dir 直接按 case 名与 seed 分组；同一组合覆盖旧产物，不创
 
 普通单跑 run/sim 会覆盖相同目录中的旧结果；回归和 rerun 使用独立目录保留产物。report 将丢失或损坏的通过证据标记为 INCOMPLETE。溯源引用不能替代目录备份；删除来源回归目录也会删除其 rerun 子目录。
 
-`--dry-run` 不写编译成功记录，也不清理编译或仿真目录；预览记录统一放在 `regr_dir/<preview-id>/report/`；单跑命令指向原单跑目录，回归命令指向本次独立目录。
+`--dry-run` 不写编译成功记录，也不清理编译或仿真目录；单跑预览记录放在 `preview_dir/<preview-id>/report/`，回归预览放在 `regr_dir/<preview-id>/report/`；实际单跑记录位于对应 case_dir，回归记录位于本次独立目录。
 
 运行记录与 output 共享存储。启动时在首个健康输出根建立记录；该记录位置在执行中不可写时停止并返回错误，不伪造完成记录，不承诺整个输出盘丢失后的自动恢复。
 
@@ -471,7 +472,7 @@ sim_dir 直接按 case 名与 seed 分组；同一组合覆盖旧产物，不创
 
 ## LSF 与本地运行
 
-未配置 scheduler 时默认 LSF，支持 `-scheduler local` 切换本地。`com/sim/run/regr` 都接受 `-jobs N`（默认 1）和 `-queue 队列名`；命令行覆盖 submit 中的调度配置。队列不设置时由集群选择默认队列。
+未配置 scheduler 时默认 LSF，支持 `-scheduler local` 切换本地。`com/sim/run/regr` 都接受 `-jobs N`（默认 1）和 `-queue 队列名`；命令行覆盖 submit 中的调度配置。`run/sim` 多组合时，同一 submit 下逐个执行，不同 submit 最多并行 N 个；`regr` 对所有任务使用统一的 N 个并发窗口。队列不设置时由集群选择默认队列。
 
 ```sh
 nsim regr --project conv_verif -l /work/chip/conv_verif/smoke.caselist \

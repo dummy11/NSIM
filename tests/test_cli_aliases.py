@@ -53,9 +53,12 @@ class AliasParsingTests(unittest.TestCase):
             short = [stage, '-p', '/project', '-s', 'rtl', 'debug', '-m', 'rtl', '-d', 'nightly',
                      '-cd', 'build', '-sd', 'results', '-j', '4', '-retry', '2', '-rt', '30',
                      '-fb', '4096', '-fi', '10', '-n', '-sched', 'lsf', '-R', 'rusage[mem=4096]', '-lic', 'vcs=1']
-            if stage != 'com':
+            if stage == 'regr':
                 long += ['--caselist', 'smoke.list', '--seed', '42', '43']
                 short += ['-l', 'smoke.list', '-S', '42', '43']
+            elif stage in ('run', 'sim'):
+                long += ['--case', 'smoke', 'fast', '--seed', '42', '43']
+                short += ['-c', 'smoke', 'fast', '-S', '42', '43']
             with self.subTest(stage=stage):
                 self.same(long, short)
         self.same(['run', '-sub', 'rtl', '--case', 'smoke', '--seed', '42'],
@@ -85,9 +88,14 @@ class AliasParsingTests(unittest.TestCase):
         args = self.parser.parse_args(['run', '-s', 'rtl', '--submit', 'debug', '-c', 'smoke',
                                        '-S', '42', '--seed', '43', '-p', 'old', '--project', 'new'])
         self.assertEqual(args.submit, [Path('rtl'), Path('debug')])
+        self.assertEqual(args.case, ['smoke'])
         self.assertEqual(args.seed, [42, 43])
         self.assertEqual(args.project, Path('new'))
+        repeated = self.parser.parse_args(['run', '-s', 'rtl', '-c', 'smoke', '--case', 'fast'])
+        self.assertEqual(repeated.case, ['smoke', 'fast'])
         for args in (['run', '-s', 'rtl', '-c', 'smoke', '-l', 'smoke.list'],
+                     ['sim', '-s', 'rtl', '-l', 'smoke.list'],
+                     ['run', '-s', 'rtl'], ['sim', '-s', 'rtl'],
                      ['regr', '-s', 'rtl', '-l', 'smoke.list', '-S', '42', '-r', '2'],
                      ['com', '-s', 'rtl', '-S', '42'], ['run', '-c', 'smoke']):
             with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:

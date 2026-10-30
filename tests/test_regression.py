@@ -151,7 +151,7 @@ class RegressionTests(Fixture):
         self.cases.write_text("slow\n")
         self.data["fake"] = {"durations": {"slow": 10}}
         self.save_submit()
-        process = subprocess.Popen([sys.executable, "-m", "nsim", "run",
+        process = subprocess.Popen([sys.executable, "-m", "nsim", "regr",
                                     "--project", str(self.project), "--caselist", str(self.cases),
                                     "--submit", str(self.submit), "--output-root", str(self.out)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
@@ -293,7 +293,7 @@ class RegressionTests(Fixture):
             replay(journal)
 
     def test_cli_executes_from_arbitrary_working_directory(self):
-        completed = subprocess.run([sys.executable, "-m", "nsim", "run",
+        completed = subprocess.run([sys.executable, "-m", "nsim", "regr",
                                     "--project", str(self.project), "--caselist", str(self.cases),
                                     "--submit", str(self.submit), "--seed", "17", "--jobs", "2",
                                     "--output-root", str(self.out)],

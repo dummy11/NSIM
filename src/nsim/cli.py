@@ -24,7 +24,7 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
     )
     add_argument(parser, "--version", action="version", version="%(prog)s " + get_version())
     add_argument(parser, '-o', '--output-root', dest='global_output_root', action='append', type=Path,
-                        help='Select one output root for com/sim/run/regr/rerun/recover')
+                        help='Select one output root for com/sim/run/regr/recover')
     commands = parser.add_subparsers(dest="command")
     project_admin.add_commands(commands)
     from nsim.submit_commands import add_commands
@@ -82,10 +82,11 @@ def build_parser(parser_class=argparse.ArgumentParser) -> argparse.ArgumentParse
         add_argument(execute, "--resource", action="append")
         add_argument(execute, "--license", action="append", help="LSF resource=count; CLI replaces submit licenses")
     for action in ("rerun", "recover"):
-        again = add_command(commands, action, help="Replay terminal failures" if action == "rerun" else "Recover terminal storage/evidence failures")
+        again = add_command(commands, action, help="Recompile current inputs and rerun failed cases with their original seeds" if action == "rerun" else "Recover terminal storage/evidence failures")
         add_argument(again, "source", type=Path, help="Completed simulation or regression directory")
-        add_argument(again, '-o', "--output-root", action="append", type=Path)
-        add_argument(again, '-seed', "--seed", type=int)
+        if action == 'recover':
+            add_argument(again, '-o', "--output-root", action="append", type=Path)
+            add_argument(again, '-seed', "--seed", type=int)
         add_argument(again, "--jobs", type=int)
         add_argument(again, "--retries", type=int)
         add_argument(again, "--retry-seconds", type=float)
@@ -160,7 +161,7 @@ def prepare_execution(args):
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    execution_commands = ('com', 'sim', 'run', 'regr', 'rerun', 'recover')
+    execution_commands = ('com', 'sim', 'run', 'regr', 'recover')
     if args.global_output_root and args.command not in execution_commands:
         parser.error('-o before the command applies only to execution or replay commands')
     if args.command == 'capabilities':
@@ -202,8 +203,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 plan, roots, settings = prepare_execution(args)
                 journal, state = run(plan, roots, **settings)
         elif args.command in ("rerun", "recover"):
-            journal, state = replay(args.source, roots=args.output_root or args.global_output_root,
-                                    recovery=args.command == "recover", seed=args.seed, jobs=args.jobs,
+            journal, state = replay(args.source, roots=getattr(args, 'output_root', None) or args.global_output_root,
+                                    recovery=args.command == "recover", seed=getattr(args, 'seed', None), jobs=args.jobs,
                                     retries=args.retries, retry_seconds=args.retry_seconds)
         else:
             parser.print_help()

@@ -242,15 +242,18 @@ class RegressionTests(Fixture):
         self.assertEqual(task["parent"]["run"], state["id"])
         self.assertEqual(before, {str(p): digest(p) for p in journal.rglob("*") if p.is_file()})
 
-    def test_changed_inputs_refuse_replay(self):
+    def test_changed_inputs_are_replanned_for_rerun_but_not_recovery(self):
         self.data["fake"] = {"outcomes": {"fast": "fail"}}
         self.save_submit()
         journal, _ = self.launch()
         (self.project / "input.txt").write_text("changed\n")
+        repeated, _ = replay(journal)
+        self.assertEqual(load_final(repeated)[0]['input_hashes'][str(self.project / 'input.txt')],
+                         digest(self.project / 'input.txt'))
         with self.assertRaises(IntegrityError):
-            replay(journal)
+            replay(journal, recovery=True)
 
-    def test_switching_project_pin_preserves_old_replay(self):
+    def test_rerun_requires_current_project_runtime(self):
         from nsim import get_version
         pin = self.project / ".nsim_version"
         pin.write_text(get_version() + "\n")
@@ -258,9 +261,8 @@ class RegressionTests(Fixture):
         self.save_submit()
         journal, _ = self.launch()
         pin.write_text("99.0.0\n")
-        other, rerun = replay(journal)
-        self.assertIsNotNone(other)
-        self.assertEqual(len(rerun["tasks"]), 1)
+        with self.assertRaisesRegex(ConfigError, 'selected nsim version'):
+            replay(journal)
 
     def test_corrupted_result_invalidates_pass_and_can_recover(self):
         journal, state = self.launch()

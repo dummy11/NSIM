@@ -182,15 +182,16 @@ shutil.copyfile(source, target)
                 run(self.stage('com'), [self.out])
         self.assertTrue(run(self.stage('com'), [self.out])[1]['passed'])
 
-    def test_sim_replay_requires_original_compilation_instance(self):
+    def test_sim_rerun_rebuilds_even_if_original_compilation_was_replaced(self):
         self.data['fake'] = {'outcomes': {'smoke': 'fail'}}
         self.save_submit()
         run(self.stage('com'), [self.out])
         record, state = run(self.stage('sim'), [self.out])
         self.assertFalse(state['passed'])
         run(self.stage('com'), [self.out])
-        with self.assertRaisesRegex(ConfigError, 'recorded compilation changed'):
-            replay(record)
+        repeated, state = replay(record)
+        self.assertEqual(state['phase'], 'regr')
+        self.assertNotEqual(repeated, record)
 
     def test_compile_symlink_and_shared_build_collision_rejected(self):
         external = self.base / 'external'
@@ -279,14 +280,15 @@ target.chmod(0o755)
             futures = [executor.submit(run, plan, [self.out]) for plan in plans]
             self.assertTrue(all(future.result()[1]['passed'] for future in futures))
 
-    def test_sim_replay_keeps_stage_and_does_not_recompile(self):
+    def test_sim_rerun_forces_new_build_without_changing_original(self):
         self.data['fake'] = {'outcomes': {'smoke': 'fail'}}
         self.save_submit()
         build, _ = run(self.stage('com'), [self.out])
         before = digest(build / 'build.json')
         record, _ = run(self.stage('sim'), [self.out])
-        record, state = replay(record, seed=7)
+        record, state = replay(record)
         self.assertFalse(state['passed'])
-        self.assertEqual(state['phase'], 'sim')
-        self.assertEqual(record.name, 'smoke_7')
+        self.assertEqual(state['phase'], 'regr')
+        self.assertEqual(record.name, 'report')
+        self.assertEqual(state['tasks'][0]['seed'], 42)
         self.assertEqual(digest(build / 'build.json'), before)

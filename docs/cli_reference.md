@@ -22,7 +22,7 @@
 | `nsim sim` | 使用已有编译产物仿真并检查结果 | 无 |
 | `nsim run` | 编译、仿真及结果检查 | 无 |
 | `nsim regr` | 按用例清单批量编译、仿真及汇总 | 无 |
-| `nsim rerun SOURCE` | 重跑已结束记录中未通过的任务 | `SOURCE` 必填 |
+| `nsim rerun SOURCE` | 固定失败 case/seed，使用当前输入强制重编译并完整重跑 | `SOURCE` 必填 |
 | `nsim recover SOURCE` | 恢复存储或证据失败的任务 | `SOURCE` 必填 |
 | `nsim report SOURCE` | 查看单 case 结果或校验回归 HTML，可重建展示页面 | `SOURCE` 必填 |
 | `nsim storage check ROOT` | 检查已有输出目录的空间及读写能力 | `ROOT` 必填 |
@@ -116,7 +116,7 @@
 | --- | --- |
 | `-h / --help` | 显示当前层级帮助，如 `nsim regr -h` |
 | `--version` | 输出当前包版本并退出，等价于普通文本形式的 `nsim version` |
-| `-o / --output-root PATH` | 放在子命令前时，为 `com/sim/run/regr/rerun/recover` 指定本次输出根；可重复 |
+| `-o / --output-root PATH` | 放在子命令前时，为 `com/sim/run/regr/recover` 指定本次输出根；可重复 |
 
 子命令后也指定输出根时，后面的整组值优先。`nsim -o ... update` 不合法；保存项目默认目录使用 `nsim update --output-root ...`。
 
@@ -224,7 +224,7 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 
 重复 `--resource` 或 `--license` 构成新的覆盖列表或映射，不追加到 submit 的原配置。资源表达式含括号等字符时加引号，例如 `--resource 'rusage[mem=4096]'`。
 
-`--retries` 与 `--retry-seconds` 非零时报配置错误。仿真超时在 submit 的 `timeout_seconds` 中配置；再次执行或更换输出根需要显式使用 rerun/recover。
+`--retries` 与 `--retry-seconds` 非零时报配置错误。仿真超时在 submit 的 `timeout_seconds` 中配置；再次执行使用 rerun；恢复历史输入并更换输出根使用 recover。
 
 ## 报告、重跑、恢复与存储
 
@@ -232,12 +232,12 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 
 | 命令 | 全部选项 | 默认行为 |
 | --- | --- | --- |
-| `rerun SOURCE` | `-o / --output-root PATH`、`-seed / --seed N`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | 沿用历史输入和版本；历史多根计划需明确选择本次输出根 |
-| `recover SOURCE` | 与 rerun 相同 | 仅选择存储/证据失败；报告发布失败时重建相关任务报告 |
+| `rerun SOURCE` | `--jobs N`、`--retries 0`、`--retry-seconds 0` | 固定 case/seed，在来源回归的 rerun/<ID>/ 下使用当前输入强制编译；不接受 seed 或输出根覆盖 |
+| `recover SOURCE` | `-o / --output-root PATH`、`-seed / --seed N`、`--jobs N`、`--retries 0`、`--retry-seconds 0` | 仅选择存储/证据失败；报告发布失败时重建相关任务报告 |
 | `report SOURCE` | `--json`、`--rebuild` | 单 case 输出文本摘要；完整回归输出 HTML 路径；不完整时给出简短原因 |
 | `storage check ROOT` | `--min-free-bytes N`、`--min-free-inodes N` | 两个阈值均默认 0；输出 JSON |
 
-重跑的 `-o` 可重复，`-seed` 只能给一个新值。rerun/recover 的并发选项也支持 `-j / -jobs / --jobs`。两者不接受 `--project`、`--dry-run`、`-sub`、`-l`、`-repeat` 或队列覆盖；输入和版本取自历史记录。
+`rerun` 不接受 `-seed/--seed/-S` 或 `-o/--output-root`（包括子命令前的全局选项）。`recover` 保留输出根和单个 seed 覆盖入口。两者的并发选项支持 `-j / -jobs / --jobs`，不接受 `--project`、`--dry-run`、`-sub`、`-l`、`-repeat` 或队列覆盖。rerun 使用来源工程的当前输入、submit 配置与版本 pin；recover 使用历史输入与版本。详见 [失败重跑](rerun.md)。
 
 `storage check` 会在目录内创建临时探测文件，完成读写与 fsync 后删除。`recover` 重新执行相关任务，不是仿真断点续跑。
 
@@ -307,7 +307,7 @@ seed 范围为 1–2147483647。未指定 seed 或 repeat 时生成一个随机 
 
 | 较长写法或复杂设置 | 当前支持的简化方式 |
 | --- | --- |
-| `--output-root PATH` | 执行、重跑和项目配置命令用 `-o PATH`；长期默认值用 `nsim update --output-root PATH` 保存一次 |
+| `--output-root PATH` | 执行（rerun 除外）、recover 和项目配置命令用 `-o PATH`；长期默认值用 `nsim update --output-root PATH` 保存一次 |
 | `--caselist FILE...` | `-l FILE...` |
 | `--submit FILE...` | `-s NAME...`，文件放在工程 `submit/` 下即可用裸名称 |
 | `--seed N...` | `-S N...`；回归随机采样用 `-r N` |

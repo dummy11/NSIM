@@ -76,7 +76,7 @@ nsim rc /path/to/record_dir -o /scratch/backup_out
 nsim disk check /scratch/my_project_out
 ```
 
-`sim` 要求已有匹配的编译产物。`rerun` 重跑未通过任务；`recover` 重跑存储/证据失败任务。它们沿用历史计划的输入和版本；单跑的同一 case/seed 目录会覆盖，回归按批次隔离输出。
+`sim` 要求已有匹配的编译产物。`rerun` 固定失败 case/seed，使用当前输入强制重编译，在来源回归的 `rerun/<ID>/` 下生成独立结果；不支持 seed 或输出根覆盖。`recover` 使用历史输入和版本恢复存储/证据失败任务。详见 [失败重跑](rerun.md)。
 
 ## 初始化与版本管理
 

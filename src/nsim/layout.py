@@ -51,10 +51,20 @@ def isolated_regression(plan):
     return plan.get('execution', {}).get('layout') == 'isolated-regression-v1'
 
 
+def regression_directory(root, plan):
+    parent = plan.get('execution', {}).get('rerun_parent')
+    if parent is not None:
+        parent = Path(parent)
+        if parent.is_absolute() or not parent.parts or '..' in parent.parts:
+            raise ConfigError('rerun parent must be a relative path inside the original output root')
+        return Path(root) / parent / 'rerun' / plan['id']
+    return Path(root) / 'regr_dir' / plan['id']
+
+
 def workspace_directory(root, plan, task):
     submit = plan['submits'][task['submit']]['name']
     if isolated_regression(plan):
-        root = Path(root) / 'regr_dir' / plan['id']
+        root = regression_directory(root, plan)
     return Path(root) / submit / plan.get('execution', {}).get('workspace', 'rtl')
 
 
@@ -74,7 +84,7 @@ def simulation_directory(root, plan, task):
 
 def record_directory(root, plan):
     if is_regression(plan):
-        path = Path(root) / 'regr_dir' / plan['id']
+        path = regression_directory(root, plan)
         return path / 'report' if plan.get('execution', {}).get('layout') else path
     if plan.get('execution', {}).get('phase') == 'com':
         return build_directory(root, plan, plan['tasks'][0])
@@ -101,9 +111,9 @@ def validate_layout(plan, roots):
         for root in roots:
             for task in plan['tasks']:
                 submit_name = plan['submits'][task['submit']]['name']
-                if submit_name.casefold() == 'report':
+                if submit_name.casefold() in ('report', 'rerun'):
                     raise ConfigError(f'submit name conflicts with regression metadata: {submit_name}')
-                owner = root / 'regr_dir' / plan['id'] / submit_name
+                owner = regression_directory(root, plan) / submit_name
                 for path in (build_directory(root, plan, task), simulation_root(root, plan, task)):
                     if owner not in path.parents:
                         raise ConfigError(f'regression product must stay inside its submit directory: {path}')

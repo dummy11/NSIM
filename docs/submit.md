@@ -86,7 +86,7 @@ case_defaults 内的字段 null 用于清除对应运行参数，其余字段按
 
 不带 extends 的独立 submit 仍受支持。name 为 1–128 个安全字符，首字符为字母或数字，
 其余可用字母、数字、下划线、点和连字符；regr_dir 是保留名。
-父子原文、路径链及哈希和合并后配置记录在 plan.json；父文件改动会阻止旧计划精确重跑。
+父子原文、路径链及哈希和合并后配置记录在 plan.json；父文件改动会阻止 recover 使用旧输入恢复；rerun 重新读取父子配置并强制编译。
 编译复用根据有效编译配置和依赖计算；只改 run_args 等仿真选项不会单独触发重编译。
 
 ## VCS 与通用字段全集
@@ -394,7 +394,7 @@ log_analysis.error_filter 既支持原来的声明文件相对路径，也支持
 如果主动把整个规则文件标为 compile，则整个文件都作为编译依赖。
 
 plan.json 保存 files、resolved_files、各阶段 file_hashes、file_snapshots 和实际引用；commands.json 展示文件及展开后 argv。
-local 和 LSF 执行节点都检查文件内容与成员集合；任何登记输入变化都会使原计划精确重跑失败，需要创建新计划。
+local 和 LSF 执行节点都检查文件内容与成员集合；recover 要求登记输入匹配历史计划；rerun 使用当前输入创建新计划，并在本次执行期间校验输入一致性。
 project.inputs 仍按旧规则纳入编译依赖；同一文件也在 project.inputs 时，运行阶段声明不会缩小其影响范围。
 不会静态执行 Tcl/Python/Make 来猜依赖，必须用 dependencies 补齐动态读取的输入。
 

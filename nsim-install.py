@@ -396,23 +396,32 @@ def find_pin_from_cwd():
     return read_pin(root) if root is not None else None
 
 
-def version_from_journal(path):
+def plan_from_journal(path):
     directory = Path(path).resolve()
     if (directory / 'report' / 'plan.json').is_file():
         directory = directory / 'report'
     if not (directory / 'plan.json').exists() and (directory / 'run.json').is_file():
         reference = json.loads((directory / 'run.json').read_text(encoding='utf-8'))
         if isinstance(reference, dict) and reference.get('schema_version') == 2 and 'plan' in reference:
-            return valid_version(reference['plan']['runtime']['version'])
+            return reference['plan']
         if (not isinstance(reference, dict) or not isinstance(reference.get('record_dir'), str)
                 or not reference['record_dir']):
             raise InstallError(f'invalid simulation record reference: {directory}')
         directory = Path(reference['record_dir']).resolve()
         if not (directory / 'plan.json').exists() and (directory / 'run.json').is_file():
             reference = json.loads((directory / 'run.json').read_text(encoding='utf-8'))
-            return valid_version(reference['plan']['runtime']['version'])
+            return reference['plan']
     plan = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
-    return valid_version(plan["runtime"]["version"])
+    return plan
+
+
+def version_from_journal(path, current=False):
+    plan = plan_from_journal(path)
+    if current:
+        pin = read_pin(plan['project']['root'])
+        if pin:
+            return pin
+    return valid_version(plan['runtime']['version'])
 
 
 def selected_version(args, root):
@@ -443,7 +452,7 @@ def selected_version(args, root):
             selector.add_argument('--rebuild', action='store_true')
         options, _ = selector.parse_known_args(args[1:])
         if options.source is not None:
-            return version_from_journal(options.source)
+            return version_from_journal(options.source, current=args[0] == 'rerun')
     project_arg = None
     for index, item in enumerate(args):
         if item == '--':

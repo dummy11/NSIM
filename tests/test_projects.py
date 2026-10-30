@@ -214,11 +214,11 @@ class ProjectTests(unittest.TestCase):
         self.cli('update', '--project', 'verification', '--output-root', 'new-output')
         result = self.cli('rerun', journal, success=False)
         replay_journal = Path(json.loads(result.stdout)['journal'])
-        self.assertEqual(replay_journal, self.base / 'output' / 'fake' / 'rtl' / 'sim_dir' / 'smoke_42')
-        self.assertEqual(json.loads((replay_journal / 'run.json').read_text())['plan']['policy']['output_roots'],
+        self.assertEqual(replay_journal.parent.parent, self.base / 'output' / 'fake' / 'rtl' / 'rerun')
+        self.assertEqual(json.loads((replay_journal / 'plan.json').read_text())['policy']['output_roots'],
                          [str(self.base / 'output')])
-        replay_plan = json.loads((journal / 'run.json').read_text())['plan']
-        self.assertEqual(replay_plan['snapshots'], original['snapshots'])
+        replay_plan = json.loads((replay_journal / 'plan.json').read_text())
+        self.assertNotEqual(replay_plan['snapshots'], original['snapshots'])
         self.assertEqual(replay_plan['source']['id'], original['id'])
         self.assertFalse((self.base / 'new-output').exists())
         self.assertFalse((self.base / 'new-events').exists())
@@ -542,9 +542,9 @@ class ProjectTests(unittest.TestCase):
         new_list.write_text('dut.sv\n')
         projects.update(self.options(project=root, rtl_filelist=new_list))
         new_journal, _ = replay(journal)
-        self.assertEqual(new_journal, journal)
-        replay_plan = json.loads((journal / 'run.json').read_text())['plan']
-        self.assertEqual(replay_plan['snapshots'], original['snapshots'])
+        self.assertNotEqual(new_journal, journal)
+        replay_plan = json.loads((new_journal / 'plan.json').read_text())
+        self.assertNotEqual(replay_plan['snapshots'], original['snapshots'])
         self.assertEqual(replay_plan['input_hashes'], original['input_hashes'])
         self.assertEqual(replay_plan['source']['id'], original['id'])
 

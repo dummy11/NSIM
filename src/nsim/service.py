@@ -17,7 +17,7 @@ from nsim.config import ConfigError, integer, number
 from nsim.identifiers import new_regression_id
 from nsim.layout import (SimulationDirectories, is_regression, make_directory, build_directory,
                          record_directory, simulation_directory, validate_layout, isolated_regression,
-                         workspace_directory)
+                         workspace_directory, regression_directory)
 from nsim.compilation import Builds
 from nsim.dashboard import Dashboard
 from nsim.planning import check_identity
@@ -83,7 +83,7 @@ def _run(plan, roots, directories, builds, jobs, retries, retry_seconds,
     plan = copy.deepcopy(plan)
     journal = None
     if dry_run or is_regression(plan):
-        execution_root = record_root / 'regr_dir' / plan['id']
+        execution_root = regression_directory(record_root, plan)
         # Claim the execution namespace before creating any compile/simulation
         # directories. Never silently adopt an old or another controller's run.
         make_directory(execution_root.parent, record_root)
@@ -366,6 +366,19 @@ def replay(source, roots=None, recovery=False, seed=None, **overrides):
     original, state = load_final(source)
     if original.get('kind') == 'batch':
         raise ConfigError('choose an individual regression from the batch report for rerun/recover')
+    if not recovery:
+        from nsim.rerun import prepare_rerun
+        if seed is not None or roots is not None:
+            raise ConfigError('rerun preserves case/seed and the original output root; overrides are not supported')
+        prepared = prepare_rerun(source, original, state)
+        if prepared is None:
+            return None, {'passed': state['passed'], 'message': 'no matching failed tasks', 'tasks': []}
+        plan, roots = prepared
+        policy = original['policy']
+        settings = {key: policy[key] for key in ('jobs', 'min_free_bytes', 'min_free_inodes')}
+        settings.update(retries=0, retry_seconds=0)
+        settings.update({key: value for key, value in overrides.items() if value is not None})
+        return run(plan, roots, **settings)
     check_identity(original)
     selected = state["tasks"] if state["report_errors"] else [
         task for task in state["tasks"] if task["effective_verdict"] not in ACCEPTED]
@@ -374,6 +387,7 @@ def replay(source, roots=None, recovery=False, seed=None, **overrides):
     if not selected:
         return None, {"passed": state["passed"], "message": "no matching failed tasks", "tasks": []}
     plan = copy.deepcopy(original)
+    plan['execution'].pop('rerun_parent', None)
     regression = is_regression(original) or isolated_regression(original)
     plan["id"] = new_regression_id(plan.get('caselists', [])) if regression else uuid.uuid4().hex
     if regression and original['execution']['phase'] != 'com':

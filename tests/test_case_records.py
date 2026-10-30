@@ -38,16 +38,17 @@ class CaseRecordTests(Fixture):
         self.assertEqual(load_final(record)[0]['id'], state['id'])
         self.assertTrue(load_final(record)[1]['passed'])
 
-    def test_single_failure_replay_and_sim_reuse(self):
+    def test_single_failure_rerun_rebuilds_with_fixed_seed(self):
         self.data['fake'] = {'outcomes': {'smoke': 'fail'}}
         self.save_submit()
         build_plan = create_plan(self.project, submit_paths=[self.submit], phase='com')
         build, _ = run(build_plan, [self.out])
         before = digest(build / 'build.json')
         record, old = run(self.one('sim'), [self.out])
-        target, new = replay(record, seed=43)
-        self.assertEqual(new['phase'], 'sim')
-        self.assertEqual(target.name, 'smoke_43')
+        target, new = replay(record)
+        self.assertEqual(new['phase'], 'regr')
+        self.assertEqual(target.name, 'report')
+        self.assertEqual(new['tasks'][0]['seed'], 42)
         self.assertEqual(new['tasks'][0]['parent']['run'], old['id'])
         self.assertEqual(digest(build / 'build.json'), before)
         self.assertEqual(load_final(target)[1]['tasks'][0]['effective_verdict'], 'FAIL')
@@ -178,7 +179,8 @@ class CaseRecordTests(Fixture):
         write_json(record / 'final.json', dict(schema_version=2, terminal=True,
                    files={n: digest(record / n) for n in ('plan.json', 'state.json')}))
         self.assertEqual(load_final(record)[0]['id'], plan['id'])
-        _, retried = replay(record)
+        repeated, retried = replay(record)
         self.assertEqual(retried['tasks'][0]['parent']['run'], plan['id'])
-        self.assertFalse((record / 'plan.json').exists())
-        self.assertEqual(json.loads((record / 'run.json').read_text())['schema_version'], 2)
+        self.assertTrue((record / 'plan.json').exists())
+        self.assertEqual(json.loads((record / 'run.json').read_text())['schema_version'], 1)
+        self.assertEqual(load_final(repeated)[0]['source']['id'], plan['id'])

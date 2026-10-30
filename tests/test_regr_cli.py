@@ -103,18 +103,19 @@ class RegressionCliTests(Fixture):
         self.assertEqual(len(state['tasks']), 4)
         self.assertEqual({task['seed'] for task in state['tasks']}, set(seeds))
         saved = json.loads((retried / 'plan.json').read_text())
-        self.assertEqual(saved['seed_selection'], {'source': 'replay', 'repeat': None, 'values': seeds})
+        self.assertEqual(saved['seed_selection'], {'source': 'rerun', 'repeat': None, 'values': seeds})
         self.assertEqual(saved['execution']['phase'], 'regr')
-        replayed, _ = replay(retried, seed=7)
-        saved = json.loads((replayed / 'plan.json').read_text())
-        self.assertEqual(saved['seed_selection'], {'source': 'replay_override', 'repeat': None, 'values': [7]})
-        self.assertEqual(len(saved['tasks']), 2)
+        with self.assertRaisesRegex(ConfigError, 'preserves case/seed'):
+            replay(retried, seed=7)
 
-    def test_changed_second_caselist_prevents_exact_replay(self):
+    def test_changed_second_caselist_does_not_rerun_passing_tasks(self):
         record, _ = run(self.plan(seeds=[42]), [self.out])
         self.other_cases.write_text('new_case\n')
+        repeated, state = replay(record)
+        self.assertIsNone(repeated)
+        self.assertTrue(state['passed'])
         with self.assertRaises(IntegrityError):
-            replay(record)
+            replay(record, recovery=True)
 
     def test_single_case_regr_keeps_summary_and_default_random_seed(self):
         self.cases.write_text('smoke\n')
@@ -146,7 +147,8 @@ class RegressionCliTests(Fixture):
             (record / 'run.log').write_text('changed evidence')
             repeated, state = replay(record)
             self.assertTrue(state['passed'])
-            self.assertEqual(repeated, record)
+            self.assertEqual(repeated.parent.parent, self.out / 'base/rtl/rerun')
+            self.assertEqual((record / 'run.log').read_text(), 'changed evidence')
         for value in ('.', '..', 'com_dir', str(self.project), str(self.out / 'regr_dir')):
             plan = create_plan(self.project, cases=['smoke'], submit_paths=[self.submit], seeds=[42], sim_dir=value)
             with self.subTest(value=value), self.assertRaises(ConfigError):

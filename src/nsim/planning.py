@@ -73,16 +73,16 @@ def check_identity(plan):
 
 
 def create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds=None, allow_missing_tools=False, scheduler_overrides=None,
-                phase='run', mode=None, directory=None, com_dir='com_dir', sim_dir='sim_dir', repeat=None, plusargs=()):
+                phase='run', mode=None, directory=None, com_dir='com_dir', sim_dir='sim_dir', repeat=None, plusargs=(), task_selection=None):
     from nsim.projects import registry_lock, project_lock
     root = resolve_root(project_path)
     with registry_lock(), project_lock(root):
         return _create_plan(root, caselist, cases, submit_paths, seeds, allow_missing_tools, scheduler_overrides,
-                            phase, mode, directory, com_dir, sim_dir, repeat, plusargs)
+                            phase, mode, directory, com_dir, sim_dir, repeat, plusargs, task_selection)
 
 
 def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds=None, allow_missing_tools=False, scheduler_overrides=None,
-                 phase='run', mode=None, directory=None, com_dir='com_dir', sim_dir='sim_dir', repeat=None, plusargs=()):
+                 phase='run', mode=None, directory=None, com_dir='com_dir', sim_dir='sim_dir', repeat=None, plusargs=(), task_selection=None):
     if phase not in ('com', 'sim', 'run', 'regr') or (mode is not None and mode not in MODES):
         raise ConfigError('invalid execution stage or mode')
     if directory is not None:
@@ -122,14 +122,19 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
         if content != get_version() + "\n":
             raise ConfigError(f"{pin}: selected nsim version does not match installed {get_version()}")
     case_sources, case_records = {}, {}
+    selected_cases = {case for _, case, _ in task_selection} if task_selection is not None else None
     if caselists:
         for path in caselists:
             for record in load_caselist(path, config_bytes):
                 case = record['case']
+                if selected_cases is not None and case not in selected_cases:
+                    continue
                 if str(path) not in case_sources.setdefault(case, []):
                     case_sources[case].append(str(path))
                 case_records.setdefault(case, []).append(record)
         cases = list(case_sources)
+    if selected_cases is not None and selected_cases - set(cases or []):
+        raise ConfigError('rerun cases missing from current caselists: ' + ', '.join(sorted(selected_cases - set(cases or []))))
     if not cases:
         raise ConfigError("at least one case is required")
     for value in cases:
@@ -272,10 +277,14 @@ def _create_plan(project_path, caselist=None, cases=None, submit_paths=(), seeds
                 sources = ', '.join(record['source'] for record in case_records[case])
                 raise ConfigError(f'conflicting definitions for logical case {case} in submit {submit["name"]}: {sources}')
             for seed in seeds:
+                if task_selection is not None and (submit['name'], case, seed) not in task_selection:
+                    continue
                 task_id = hashlib.sha256(encode([submit["name"], case, seed])).hexdigest()[:24]
                 tasks.append({"id": task_id, "case": case, "seed": seed, "submit": index,
                               "build_id": build_id, "parent": None, 'caselists': case_sources.get(case, []),
                               'case_config': resolved[0]})
+    if task_selection is not None and {(submits[t['submit']]['name'], t['case'], t['seed']) for t in tasks} != set(task_selection):
+        raise ConfigError('rerun submit names no longer match the original failed tasks')
     environment = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "TZ") if k in os.environ}
     sources = {'verification': {'root': str(project.root), **git_identity(project.root)}}
     if project.rtl_root is not None:

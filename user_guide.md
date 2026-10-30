@@ -331,7 +331,7 @@ nsim switch latest --project conv_verif
 
 以上版本号是接口示例，须先安装实际可用版本。切换要求目标版本支持项目格式，并与其他更新共用校验及事务逻辑。可把 `.nsim/` 内两份配置提交到 verification 仓库；本机索引不需要提交。
 
-稳定启动器读取 `--project` 或当前目录所属项目的版本文件。`rerun`、`recover` 和 `report` 优先读取原控制记录的版本，不受项目后续切换影响。没有项目上下文时，普通执行命令在只安装一个版本时使用该版本，否则可设置 `NSIM_VERSION` 明确选择。
+稳定启动器读取 `--project` 或当前目录所属项目的版本文件。`rerun` 根据来源记录定位工程，使用该工程当前版本 pin；无 pin 时使用记录版本。`recover` 和 `report` 使用原控制记录的版本。没有项目上下文时，普通执行命令在只安装一个版本时使用该版本，否则可设置 `NSIM_VERSION` 明确选择。
 
 ## 旧项目兼容
 
@@ -384,7 +384,7 @@ nsim run --project conv_verif \
 
 输出位置采用 **run 命令行参数 > 项目默认配置 > NSIM_OUTPUT_ROOT** 的优先级。环境变量仅为已有脚本保留兼容；新项目可只使用项目配置。没有任何可用设置时，run 会提示通过 update 保存默认目录。schema 1 项目仍使用运行参数或兼容输出环境变量。
 
-bootstrap/update 只保存目录设置，不创建或探测这些输出根。运行前需要准备好已挂载、可写的目录；run 会检查可用性与目录隔离，拒绝输出和源码/工具目录互相嵌套。`status` 显示保存值不代表存储已通过运行预检。相同 submit、工作区、case、seed 的运行复用固定目录，新运行前清理旧日志、结果和波形。历史 rerun/recover 默认沿用原记录里的输出设置，后续 update 不改变旧运行的绑定；需要更换位置时显式传入 `--output-root`。
+bootstrap/update 只保存目录设置，不创建或探测这些输出根。运行前需要准备好已挂载、可写的目录；run 会检查可用性与目录隔离，拒绝输出和源码/工具目录互相嵌套。`status` 显示保存值不代表存储已通过运行预检。相同 submit、工作区、case、seed 的运行复用固定目录，新运行前清理旧日志、结果和波形。rerun 在来源回归下独立创建重跑目录，输出位置不随 update 改变，且不接受输出根覆盖；recover 默认沿用历史输出设置，需要换根时可传 --output-root。
 
 ## Submit 公共模板与继承
 
@@ -412,7 +412,7 @@ nsim submit check rtl_debug
 
 `extends` 相对声明它的 JSON 所在目录解析，只允许一层、一个父文件。对象递归合并；数组整体替换；每个 hook 阶段也整体替换，`[]` 可清空该阶段。空对象不会清空父对象，`null` 不是通用删除操作，但 `files.NAME: null` 可删除继承的文件条目。合并完成后再校验配置，命令行调度选项覆盖合并后的值。
 
-辅助输入可在 submit 的 `files` 表登记，使用 `{file:名称}` 在参数、hooks 和用例值中引用。path、dependencies 相对工程根；phases 区分 compile、simulate、analysis。目录和 glob 追踪成员集合；内容摘要、受限小文件快照及各阶段输入进入计划。运行专用文件变化后，新计划仍可复用兼容编译；旧计划精确重跑会拒绝变化。`error_filter` 支持原来的 submit 相对路径，也支持 analysis 文件引用。`submit show/check` 检查显式文件并展示解析路径。
+辅助输入可在 submit 的 `files` 表登记，使用 `{file:名称}` 在参数、hooks 和用例值中引用。path、dependencies 相对工程根；phases 区分 compile、simulate、analysis。目录和 glob 追踪成员集合；内容摘要、受限小文件快照及各阶段输入进入计划。运行专用文件变化后，新计划仍可复用兼容编译；recover 会拒绝历史输入变化；rerun 重新规划当前输入并强制编译。`error_filter` 支持原来的 submit 相对路径，也支持 analysis 文件引用。`submit show/check` 检查显式文件并展示解析路径。
 
 新 bootstrap 的 `submit_demo.json` 显式展示完整文件管理用法，配套 `demo_inputs/` 教学文件可用于命令预览；DUT 层次、YOUR_* 和工具参数仍需按工程修改。`examples/vcs_full.json` 展示全部可选 VCS/调度/hooks/DPI 字段，command 与 fake 示例独立保存。已有文件及已注册项目保持不变。日常 `submit new` 继续生成最小差异配置。
 
@@ -422,7 +422,7 @@ nsim submit check rtl_debug
 nsim run --case smoke -sub rtl_debug -o /data/nsim-output --dry-run
 ```
 
-运行时可省略 `-mode`，自动使用有效 submit 的 mode，默认工作区也随之确定；显式指定时必须匹配。一次调用的多个 submit 必须使用同一 mode。原生 VCS 模板当前仅用于命令预览；实际运行使用工程 command 包装器或 fake 适配器。父子配置原文和哈希都会进入计划，修改任一文件会阻止旧计划精确重跑。带斜线的相对可执行路径以声明它的 JSON 目录为基准；普通参数不会自动重定位，可使用 `{project}`。完整字段、占位符及编译身份规则见 [Submit 语法](docs/submit.md)。
+运行时可省略 `-mode`，自动使用有效 submit 的 mode，默认工作区也随之确定；显式指定时必须匹配。一次调用的多个 submit 必须使用同一 mode。原生 VCS 模板当前仅用于命令预览；实际运行使用工程 command 包装器或 fake 适配器。父子配置原文和哈希都会进入计划，recover 要求父子配置匹配历史记录；rerun 读取当前配置并强制编译。带斜线的相对可执行路径以声明它的 JSON 目录为基准；普通参数不会自动重定位，可使用 `{project}`。完整字段、占位符及编译身份规则见 [Submit 语法](docs/submit.md)。
 
 ## 编译、仿真与回归目录
 
@@ -456,11 +456,11 @@ sim_dir 直接按 case 名与 seed 分组；同一组合覆盖旧产物，不创
 
 真正的单跑（一个 case × submit × seed）直接把计划、终态及完成校验保存在仿真目录，不生成实时 HTML 或回归汇总；单个 com 的阶段记录在编译目录。使用 caselist 或多个 submit/seed 时，该次回归的记录和产物均隔离在 regr_dir/<id>/，汇总文件位于 report/。
 
-`report`、`rerun`、`recover` 接受命令返回的 `record_dir`，也接受批次中某个 sim_dir 的运行目录；后者通过经过校验的 `run.json` 引用选择单个任务。回归记录与该引用应一起保留。重跑沿用相同 case/seed 的目录并覆盖旧结果；修改源码后重新验证应发起新 run。统一覆盖 seed 后指向同一目录的失败任务会合并为一次执行，并保留各自来源。
+`report`、`rerun`、`recover` 接受命令返回的 record_dir，也接受回归中某个 sim_dir 的运行目录；后者通过校验过的 run.json 选择单个任务。rerun 固定 case/seed，使用当前输入强制重新编译，结果存入原回归下独立的 rerun/<ID>/，保留原产物和报告。单跑来源则在原工作区的 rerun/<ID>/ 下保存独立结果。
 
-独立 `--event-root` 参数和 `NSIM_EVENT_ROOT` 已取消。此前候选版本配置中的 `event_root` 仅为兼容读取而忽略，使用 `update --output-root ...` 时从新配置中移除；旧 event-root 目录不迁移、不删除；选中重新执行的 case/seed 目录会按覆盖规则清理。旧记录的 report/rerun 仍由启动器选择其记录的工具版本，精确重跑仍要求原输入和运行时可验证。
+独立 --event-root 参数和 NSIM_EVENT_ROOT 已取消；旧 event-root 目录不迁移、不删除。report/recover 由启动器选择历史版本；rerun 选择来源工程当前版本 pin，读取当前输入并重新建立计划。
 
-单跑只保留最新计划和结果。历史回归的批次记录保留，但被覆盖的用例日志不再代表该历史批次；`report` 会将缺失或已变更的通过证据标记为 INCOMPLETE。需要长期保存日志时，应在重跑前自行复制，或使用另一个 `-dir` 工作区。
+普通单跑 run/sim 会覆盖相同目录中的旧结果；回归和 rerun 使用独立目录保留产物。report 将丢失或损坏的通过证据标记为 INCOMPLETE。溯源引用不能替代目录备份；删除来源回归目录也会删除其 rerun 子目录。
 
 `--dry-run` 不写编译成功记录，也不清理编译或仿真目录；预览记录统一放在 `regr_dir/<preview-id>/report/`；单跑命令指向原单跑目录，回归命令指向本次独立目录。
 
@@ -511,15 +511,17 @@ nsim storage check /tmp/nsim-output --min-free-bytes 104857600
 
 `--rebuild` 从仍可校验的计划与状态生成 `report.rebuilt.html`，不修改原 `final.json`、`report.html` 或任务记录；该新页面不属于原完成校验。如果日志证据发生变化，新页面会将原通过结果标为 INCOMPLETE。计划、状态或完成记录损坏时不能重建。`report` 从不提交、恢复或重启任务；需要重新执行时使用 `rerun` 或 `recover`。`report` 的退出码：完整且通过为 0，完整但任务失败为 1，报告或证据不完整为 2。
 
-`rerun` 仅重跑最终未通过的任务，默认保持原 seed、submit、显式环境和输入身份。`--seed` 可显式改变 seed，来源与变化保存在新计划中。`recover` 选择存储/证据不完整的任务；若整个报告发布失败，则重新运行相关任务以生成完整报告。两者都记录新运行和新 attempt，但相同 case/seed 的日志、结果和波形直接覆盖。批次记录保留原错误和来源关系；单跑目录只保留最新记录。统一修改 seed 后重合的任务只执行一次，保留全部 parent 引用。
+`rerun` 固定来源记录中最终未通过任务的 case、seed 和 submit 选择，重新读取当前工程登记、源码、submit、caselist/YAML 与输入文件。每个 submit 强制编译一次，再完整执行对应失败 case，包含原先以 sim 启动的任务；没有 compile 步骤的 command submit 会报错。每次生成独立的 rerun/<ID>/、report/ 与 parent 引用，不覆盖历史结果。禁止 -seed/--seed/-S 和 -o/--output-root 覆盖，可用 --jobs 调整并发。详细目录、边界及例子见 [失败重跑](docs/rerun.md)。
 
-执行配置、声明的输入、命令可执行文件、`nsim` 源文件或已记录依赖版本变化时拒绝精确重跑。schema 2 注册配置使用历史快照，更新登记不替换旧回归的输入绑定。损坏的结果文件会让原通过结果显示为 INCOMPLETE；丢失或损坏的控制记录不允许自动恢复。控制器异常退出、旧任务状态未知时，也拒绝自动重叠派发。
+`recover` 仍使用历史输入、版本和执行阶段，仅选择存储/证据不完整任务；报告发布失败时重新执行相关任务。单跑恢复会覆盖原目录，回归恢复独立输出；保留原有输出根与 seed 覆盖入口。
+
+rerun 为当前输入建立新的 hash 和配置快照，不要求与历史输入相同；本次执行前后仍检查输入一致性。recover 要求历史输入和运行时可验证。两者都拒绝损坏的控制记录和未确认终态的来源，不自动重叠派发状态未知的旧任务。
 
 自动故障转移通过 `--retries`（默认 1）和 `--retry-seconds`（默认 120）限制。检测到存储 I/O 失败后，该输出根在本次运行内被隔离；新 attempt 可以使用尚未隔离的备用根。没有健康位置时保留失败，不盲目重复写故障盘。功能 FAIL 不自动重试。
 
 ## 历史回归与身份
 
-每次新布局运行分别记录 RTL 和 verification 的 Git 身份（非 Git 目录显式为空），以及实际参与执行的输入文件哈希；同时记录工具版本、Python 路径与字节哈希、`nsim` 源文件哈希、依赖版本，以及通过启动器安装时的 wheel SHA-256。`nsim rerun <journal>` 从原计划（单跑 run.json.plan，回归 plan.json）选择原版本；如果该版本未安装，会明确报错。精确重跑还要求原 Python 环境、工具代码和工程输入仍与记录一致。schema 2 的项目配置作为快照保存，后续 update 或 switch 不替换旧计划的绑定；旧计划仍校验原源码、submit、caselist、显式输入和运行环境。源码已改变或丢失时不能精确重跑，也不自动归档或恢复源码。schema 1 的旧计划继续校验原描述文件哈希，不放宽历史规则。
+每次执行记录 RTL 和 verification 的 Git 身份、实际声明输入的 hash、配置快照，以及工具、Python、依赖和安装 wheel 身份。rerun 读取当前工程配置重新建立这些记录，保留原任务的 case/seed 及 parent 关联；启动器使用来源工程当前版本 pin，未安装时明确报错。recover 校验历史输入和运行时，schema 2 使用历史注册快照，schema 1 继续校验原描述文件。NSIM 不自动归档或恢复源码。
 
 ## 存储检查与能力边界
 

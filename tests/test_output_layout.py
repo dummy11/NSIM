@@ -81,20 +81,24 @@ class OutputLayoutTests(Fixture):
         self.assertEqual(record.parent.parent, self.out / 'regr_dir')
         self.assertTrue((record / 'report.html').exists())
 
-    def test_seed_override_merges_duplicate_destinations_and_keeps_parent_references(self):
+    def test_rerun_keeps_each_original_seed_and_rejects_overrides(self):
         self.data['fake'] = {'outcomes': {'smoke': 'fail'}}
         self.save_submit()
         plan = create_plan(self.project, cases=['smoke'], submit_paths=[self.submit], seeds=[42, 43])
         record, _ = run(plan, [self.out])
-        new, state = replay(record, seed=7, jobs=2)
-        self.assertEqual(len(state['tasks']), 1)
+        with self.assertRaisesRegex(ConfigError, 'preserves case/seed'):
+            replay(record, seed=7)
+        with self.assertRaisesRegex(ConfigError, 'original output root'):
+            replay(record, roots=[self.backup])
+        new, state = replay(record, jobs=2)
+        self.assertEqual({task['seed'] for task in state['tasks']}, {42, 43})
+        self.assertEqual(new.parent.parent, record.parent / 'rerun')
         task = state['tasks'][0]
-        self.assertEqual(len(task['parents']), 2)
         directory = Path(task['attempts'][0]['cwd'])
-        self.assertEqual(directory, new.parent / 'base' / 'rtl' / 'sim_dir' / 'smoke_7')
+        self.assertEqual(directory, new.parent / 'base' / 'rtl' / 'sim_dir' / 'smoke_42')
         selected, result = load_final(directory)
         self.assertEqual(len(result['tasks']), 1)
-        self.assertEqual(result['tasks'][0]['seed'], 7)
+        self.assertEqual(result['tasks'][0]['seed'], 42)
         self.assertEqual(selected['id'], state['id'])
 
     def test_old_success_cannot_mask_missing_new_result(self):

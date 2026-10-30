@@ -73,8 +73,9 @@ class AliasParsingTests(unittest.TestCase):
         for action in ('show', 'check'):
             self.same(['submit', action, 'init', '--project', 'demo'], ['sub', action, 'init', '-p', 'demo'])
         for long, short in [('rerun', 'rr'), ('recover', 'rc')]:
-            self.same([long, '/record', '--jobs', '3', '--seed', '42', '--retries', '2', '--retry-seconds', '20'],
-                      [short, '/record', '-j3', '-S42', '-retry', '2', '-rt', '20'])
+            self.same([long, '/record', '--jobs', '3', '--retries', '2', '--retry-seconds', '20'],
+                      [short, '/record', '-j3', '-retry', '2', '-rt', '20'])
+        self.same(['recover', '/record', '--seed', '42'], ['rc', '/record', '-S42'])
         self.same(['report', '/record', '--json', '--rebuild'], ['rpt', '/record', '-J', '--rebuild'])
         self.same(['storage', 'check', '/out', '--min-free-bytes', '10', '--min-free-inodes', '2'],
                   ['disk', 'check', '/out', '-fb', '10', '-fi', '2'])
@@ -173,7 +174,8 @@ class LauncherAliasTests(unittest.TestCase):
                 self.assertEqual(self.installer.selected_version(['run', *options], self.base), '0.1.0')
         record = self.base / 'record'
         record.mkdir()
-        (record / 'plan.json').write_text(json.dumps({'runtime': {'version': '0.1.0'}}))
+        (record / 'plan.json').write_text(json.dumps({'runtime': {'version': '0.1.0'},
+                                                    'project': {'root': first}}))
         for args in (['rr', str(record), '-j4'], ['rc', str(record), '-S42'], ['rpt', str(record), '-J'],
                      ['-o', '/out', 'rr', str(record)], ['rr', '-j4', str(record)],
                      ['rc', '-S', '42', '-rt', '30', str(record)], ['rpt', '-J', '--rebuild', str(record)]):
